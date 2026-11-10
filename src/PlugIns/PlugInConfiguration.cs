@@ -80,9 +80,10 @@ public class PlugInConfiguration : INotifyPropertyChanged
     {
         get
         {
-            var plugInType = AppDomain.CurrentDomain.GetAssemblies()
-                .SelectMany(assembly => assembly.DefinedTypes)
-                .FirstOrDefault(t => t.GUID == this.TypeId);
+            var plugInType = PlugInRegistries.FindPlugInType(this.TypeId)
+                ?? AppDomain.CurrentDomain.GetAssemblies()
+                    .SelectMany(GetTypesSafely)
+                    .FirstOrDefault(t => t.GUID == this.TypeId);
             var plugInAttribute = plugInType?.GetCustomAttribute<DisplayAttribute>(inherit: false);
 
             return plugInAttribute?.GetName() ?? this.TypeId.ToString();
@@ -102,5 +103,21 @@ public class PlugInConfiguration : INotifyPropertyChanged
     protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         this.PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    private static IEnumerable<TypeInfo> GetTypesSafely(Assembly assembly)
+    {
+        try
+        {
+            return assembly.DefinedTypes;
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return ex.Types.Where(t => t != null).Select(t => t!.GetTypeInfo());
+        }
+        catch
+        {
+            return Enumerable.Empty<TypeInfo>();
+        }
     }
 }

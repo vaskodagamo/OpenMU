@@ -13,7 +13,7 @@ using MUnique.OpenMU.PlugIns;
 [Guid("E4D65354-CCD2-4960-BDCA-D4582A57BBCB")]
 [PlugIn]
 [Display(Name = nameof(PlugInResources.GetLevelUpPointsChatCommandPlugIn_Name), Description = nameof(PlugInResources.GetLevelUpPointsChatCommandPlugIn_Description), ResourceType = typeof(PlugInResources))]
-[ChatCommandHelp(Command, "Gets level up points of a player. Usage: /getleveluppoints (optional:character)", null)]
+[ChatCommandHelp(Command, typeof(Arguments), MinimumStatus)]
 public class GetLevelUpPointsChatCommandPlugIn : ChatCommandPlugInBase<GetLevelUpPointsChatCommandPlugIn.Arguments>, IDisabledByDefault
 {
     private const string Command = "/getleveluppoints";
@@ -56,6 +56,7 @@ public class GetLevelUpPointsChatCommandPlugIn : ChatCommandPlugInBase<GetLevelU
         /// <summary>
         /// Gets or sets the character name to get level-up points for.
         /// </summary>
+        [ValueReference(ChatCommandValueReference.CharacterName)]
         public string? CharacterName { get; set; }
     }
 }

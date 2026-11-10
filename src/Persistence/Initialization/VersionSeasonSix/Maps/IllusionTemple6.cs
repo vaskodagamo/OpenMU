@@ -5,6 +5,8 @@
 namespace MUnique.OpenMU.Persistence.Initialization.VersionSeasonSix.Maps;
 
 using MUnique.OpenMU.DataModel.Configuration;
+using MUnique.OpenMU.Interfaces;
+using MUnique.OpenMU.Persistence.Initialization.Properties;
 
 /// <summary>
 /// Initialization for the Illusion Temple 6.
@@ -17,11 +19,6 @@ internal class IllusionTemple6 : BaseMapInitializer
     internal const byte Number = 50;
 
     /// <summary>
-    /// The Name of the Map.
-    /// </summary>
-    internal const string Name = "Illusion Temple 6";
-
-    /// <summary>
     /// Initializes a new instance of the <see cref="IllusionTemple6"/> class.
     /// </summary>
     /// <param name="context">The context.</param>
@@ -31,27 +28,39 @@ internal class IllusionTemple6 : BaseMapInitializer
     {
     }
 
+    /// <summary>
+    /// Gets the name of the map.
+    /// </summary>
+    internal static LocalizedString Name => LocalizedString.FromResource(() => MapNames.IllusionTemple6);
+
     /// <inheritdoc/>
     protected override byte MapNumber => Number;
 
     /// <inheritdoc/>
-    protected override string MapName => Name;
+    protected override LocalizedString MapName => Name;
+
+    /// <inheritdoc/>
+    protected override byte SafezoneMapNumber => Devias.Number;
 
     /// <inheritdoc/>
     protected override IEnumerable<MonsterSpawnArea> CreateMonsterSpawns()
     {
         // NPCs:
-        yield return this.CreateMonsterSpawn(100, this.NpcDictionary[658], 169, 085, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Cursed Statue
-        yield return this.CreateMonsterSpawn(101, this.NpcDictionary[659], 136, 101, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Captured Stone Statue (1)
-        yield return this.CreateMonsterSpawn(102, this.NpcDictionary[660], 151, 119, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Captured Stone Statue (2)
-        yield return this.CreateMonsterSpawn(103, this.NpcDictionary[661], 150, 088, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Captured Stone Statue (3)
-        yield return this.CreateMonsterSpawn(104, this.NpcDictionary[662], 165, 102, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Captured Stone Statue (4)
-        yield return this.CreateMonsterSpawn(105, this.NpcDictionary[663], 173, 067, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Captured Stone Statue (5)
-        yield return this.CreateMonsterSpawn(106, this.NpcDictionary[664], 187, 081, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Captured Stone Statue (6)
-        yield return this.CreateMonsterSpawn(107, this.NpcDictionary[665], 187, 051, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Captured Stone Statue (7)
-        yield return this.CreateMonsterSpawn(108, this.NpcDictionary[666], 203, 067, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Captured Stone Statue (8)
-        yield return this.CreateMonsterSpawn(109, this.NpcDictionary[667], 133, 121, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Captured Stone Statue (9)
-        yield return this.CreateMonsterSpawn(110, this.NpcDictionary[668], 206, 048, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Captured Stone Statue (10)
+        // Pool of Stone Statue (380) positions - only one of them is active at a time, randomly picked
+        // from these two by the game logic. Positions confirmed against a working Season 6 Episode 3
+        // server's spawn list.
+        yield return this.CreateMonsterSpawn(100, this.NpcDictionary[380], 207, 047, Direction.Undefined, SpawnTrigger.ManuallyForEvent);
+        yield return this.CreateMonsterSpawn(101, this.NpcDictionary[380], 134, 121, Direction.Undefined, SpawnTrigger.ManuallyForEvent);
+
+        // Team guardians (decorative).
+        yield return this.CreateMonsterSpawn(110, this.NpcDictionary[381], 139, 046, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // MU Allies General
+        yield return this.CreateMonsterSpawn(111, this.NpcDictionary[382], 194, 123, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Illusion Elder
+
+        // Relic delivery targets - the team which carries the relic here scores a point.
+        yield return this.CreateMonsterSpawn(112, this.NpcDictionary[383], 141, 059, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Alliance Item Storage
+        yield return this.CreateMonsterSpawn(113, this.NpcDictionary[384], 194, 113, Direction.Undefined, SpawnTrigger.AutomaticDuringEvent); // Illusion Item Storage
+
+        // Temple 6 has no roaming "Illusion Sorc. Spirit" monsters.
     }
 
     /// <inheritdoc/>

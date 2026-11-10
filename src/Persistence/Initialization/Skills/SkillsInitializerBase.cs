@@ -8,6 +8,7 @@ using MUnique.OpenMU.AttributeSystem;
 using MUnique.OpenMU.DataModel.Attributes;
 using MUnique.OpenMU.DataModel.Configuration;
 using MUnique.OpenMU.GameLogic.Attributes;
+using MUnique.OpenMU.Interfaces;
 using MUnique.OpenMU.Persistence.Initialization.CharacterClasses;
 
 /// <summary>
@@ -50,7 +51,7 @@ internal abstract class SkillsInitializerBase : InitializerBase
     /// <param name="hitsPerAttack">The number of hits per attack.</param>
     protected void CreateSkill(
         SkillNumber number,
-        string name,
+        LocalizedString name,
         CharacterClasses characterClasses = CharacterClasses.None,
         DamageType damageType = DamageType.None,
         int damage = 0,
@@ -172,7 +173,7 @@ internal abstract class SkillsInitializerBase : InitializerBase
         if ((SkillNumber)skill.Number is SkillNumber.IceArrow)
         {
             skill.ElementalModifierTarget = Stats.IceResistance.GetPersistent(this.GameConfiguration);
-            skill.MagicEffectDef = this.CreateEffect(ElementalType.Ice, MagicEffectNumber.Freeze, Stats.IsFrozen, 5);
+            skill.MagicEffectDef = this.CreateEffect(ElementalType.Ice, MagicEffectNumber.Freeze, Stats.IsFrozen, 7);
             return;
         }
 
@@ -184,24 +185,33 @@ internal abstract class SkillsInitializerBase : InitializerBase
             return;
         }
 
+        if ((SkillNumber)skill.Number is SkillNumber.ChainDrive)
+        {
+            skill.ElementalModifierTarget = Stats.IceResistance.GetPersistent(this.GameConfiguration);
+            skill.SkipElementalModifier = true;
+            skill.MagicEffectDef = this.CreateEffect(ElementalType.Ice, MagicEffectNumber.Cold, Stats.IsIced, 10, 0.4f);
+            return;
+        }
+
+        if ((SkillNumber)skill.Number is SkillNumber.StrikeofDestruction)
+        {
+            skill.ElementalModifierTarget = Stats.IceResistance.GetPersistent(this.GameConfiguration);
+            skill.SkipElementalModifier = true;
+            skill.MagicEffectDef = this.CreateEffect(ElementalType.Ice, MagicEffectNumber.Cold, Stats.IsIced, 10);
+            return;
+        }
+
         switch (elementalModifier)
         {
             case ElementalType.Ice:
                 skill.ElementalModifierTarget = Stats.IceResistance.GetPersistent(this.GameConfiguration);
                 skill.MagicEffectDef = this.CreateEffect(ElementalType.Ice, MagicEffectNumber.Iced, Stats.IsIced, 10);
 
-                if ((SkillNumber)skill.Number is SkillNumber.ChainDrive)
-                {
-                    skill.SkipElementalModifier = true;
-                    skill.MagicEffectDef.Chance = this.Context.CreateNew<PowerUpDefinitionValue>();
-                    skill.MagicEffectDef.Chance.ConstantValue.Value = 0.4f;
-                }
-
                 break;
             case ElementalType.Poison:
                 skill.ElementalModifierTarget = Stats.PoisonResistance.GetPersistent(this.GameConfiguration);
 
-                // Poison Skill applies damage 7 times, while decay three times. We assume that we apply each damage
+                // Poison Skill applies damage 6 times, while decay three times. We assume that we apply each damage
                 // every 3 seconds. We leave one or two extra seconds, so that the damage is applied for sure.
                 var durationInSeconds = skill.Number == (short)SkillNumber.Poison ? 20 : 10;
                 skill.MagicEffectDef = this.CreateEffect(ElementalType.Poison, MagicEffectNumber.Poisoned, Stats.IsPoisoned, durationInSeconds);
@@ -242,12 +252,13 @@ internal abstract class SkillsInitializerBase : InitializerBase
         }
     }
 
-    private MagicEffectDefinition CreateEffect(ElementalType type, MagicEffectNumber effectNumber, AttributeDefinition targetAttribute, float durationInSeconds)
+    private MagicEffectDefinition CreateEffect(ElementalType type, MagicEffectNumber effectNumber, AttributeDefinition targetAttribute, float durationInSeconds, float chance = 0)
     {
         if (this.GameConfiguration.MagicEffects.FirstOrDefault(
                 e => e.Number == (short)effectNumber
                      && e.SubType == (byte)(0xFF - type)
                      && Equals(e.Duration?.ConstantValue.Value, durationInSeconds)
+                     && Equals(e.Chance?.ConstantValue.Value, chance)
                      && e.PowerUpDefinitions.FirstOrDefault()?.TargetAttribute == targetAttribute) is { } existingEffect)
         {
             return existingEffect;
@@ -255,7 +266,7 @@ internal abstract class SkillsInitializerBase : InitializerBase
 
         var effect = this.Context.CreateNew<MagicEffectDefinition>();
         this.GameConfiguration.MagicEffects.Add(effect);
-        effect.Name = Enum.GetName(effectNumber) ?? string.Empty;
+        effect.Name = MagicEffectNames.ResourceManager.GetLocalizedString(effectNumber.ToString());
         effect.InformObservers = true;
         effect.Number = (short)effectNumber;
         effect.StopByDeath = true;
@@ -267,6 +278,30 @@ internal abstract class SkillsInitializerBase : InitializerBase
         powerUpDefinition.Boost = this.Context.CreateNew<PowerUpDefinitionValue>();
         powerUpDefinition.Boost.ConstantValue.Value = 1;
         powerUpDefinition.TargetAttribute = targetAttribute.GetPersistent(this.GameConfiguration);
+        if (targetAttribute == Stats.IsIced)
+        {
+            var movementSpeedFactorPowerUp = this.Context.CreateNew<PowerUpDefinition>();
+            effect.PowerUpDefinitions.Add(movementSpeedFactorPowerUp);
+            movementSpeedFactorPowerUp.Boost = this.Context.CreateNew<PowerUpDefinitionValue>();
+            movementSpeedFactorPowerUp.Boost.ConstantValue.AggregateType = AggregateType.Multiplicate;
+            movementSpeedFactorPowerUp.TargetAttribute = Stats.MovementSpeedFactor.GetPersistent(this.GameConfiguration);
+
+            if (effectNumber == MagicEffectNumber.Cold)
+            {
+                movementSpeedFactorPowerUp.Boost.ConstantValue.Value = MovementSpeedConstants.ColdMovementSpeedFactor;
+            }
+            else
+            {
+                movementSpeedFactorPowerUp.Boost.ConstantValue.Value = MovementSpeedConstants.IcedMovementSpeedFactor;
+            }
+        }
+
+        if (chance > 0)
+        {
+            effect.Chance = this.Context.CreateNew<PowerUpDefinitionValue>();
+            effect.Chance.ConstantValue.Value = chance;
+        }
+
         return effect;
     }
 

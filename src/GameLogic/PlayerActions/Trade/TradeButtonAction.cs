@@ -80,6 +80,17 @@ public class TradeButtonAction : BaseTradeAction
         using var itemContext = trader.GameContext.PersistenceContextProvider.CreateNewTradeContext();
         var traderItems = trader.TemporaryStorage!.Items.ToList();
         var tradePartnerItems = tradingPartner.TemporaryStorage!.Items.ToList();
+
+        // Checked here, and not only when an item is moved into the trade: the temporary storage
+        // is shared with other windows (e.g. the chaos machine), so it may already contain items.
+        // Both are checked, so that each trader gets the message about their own items.
+        var traderItemsAreTradable = await this.CheckItemsAreTradableAsync(trader, traderItems).ConfigureAwait(false);
+        var partnerItemsAreTradable = await this.CheckItemsAreTradableAsync(tradingPartner, tradePartnerItems).ConfigureAwait(false);
+        if (!traderItemsAreTradable || !partnerItemsAreTradable)
+        {
+            return TradeResult.Cancelled;
+        }
+
         this.AttachItemsToPersistenceContext(traderItems, itemContext);
         this.AttachItemsToPersistenceContext(tradePartnerItems, itemContext);
 
@@ -91,15 +102,27 @@ public class TradeButtonAction : BaseTradeAction
             return TradeResult.FailedByFullInventory;
         }
 
+        var itemsCommitted = false;
         try
         {
             this.DetachItemsFromPersistenceContext(traderItems, trader.PersistenceContext);
             this.DetachItemsFromPersistenceContext(tradePartnerItems, trader.TradingPartner!.PersistenceContext);
-            await itemContext.SaveChangesAsync().ConfigureAwait(false);
-            this.AttachItemsToPersistenceContext(traderItems, trader.TradingPartner.PersistenceContext);
-            this.AttachItemsToPersistenceContext(tradePartnerItems, trader.PersistenceContext);
+            if (!await itemContext.SaveChangesAsync().ConfigureAwait(false))
+            {
+                throw new InvalidOperationException("Trade item changes were not saved.");
+            }
+
+            itemsCommitted = true;
+
+            // Item ownership is now committed. Move the escrowed money before any
+            // post-commit attachment or client notification can fail.
             trader.Money += trader.TradingPartner.TradingMoney;
             trader.TradingPartner.Money += trader.TradingMoney;
+
+            // Attaching a transferred item's entire graph would walk the receiving
+            // inventory and can collide with items that context already tracks.
+            this.AttachTransferredItemsToPersistenceContext(traderItems, trader.TradingPartner.PersistenceContext);
+            this.AttachTransferredItemsToPersistenceContext(tradePartnerItems, trader.PersistenceContext);
             await trader.TradingPartner.InvokeViewPlugInAsync<IChangeTradeButtonStatePlugIn>(p => p.ChangeTradeButtonStateAsync(TradeButtonState.Checked)).ConfigureAwait(false);
             this.ResetTradeState(trader.TradingPartner);
             this.ResetTradeState(trader);
@@ -110,6 +133,23 @@ public class TradeButtonAction : BaseTradeAction
         }
         catch (Exception exception)
         {
+            if (itemsCommitted)
+            {
+                // SaveChanges already committed item ownership. Cancelling the trade
+                // here would replay both inventory backups over the committed state.
+                // A remaining attachment failure needs operator investigation, but it
+                // must never turn a persisted trade into a reported cancellation.
+                (trader as Player)?.Logger.LogCritical(
+                    exception,
+                    "Trade was committed but post-commit completion failed. trader: {Trader}, partner: {Partner}.",
+                    trader.Name,
+                    tradingPartner.Name);
+                this.ResetTradeState(tradingPartner);
+                this.ResetTradeState(trader);
+                FinishedTrades.Add(1);
+                return TradeResult.Success;
+            }
+
             await this.SendMessageAsync(trader, nameof(PlayerMessage.UnexpectedErrorDuringClosingTrade)).ConfigureAwait(false);
             await this.SendMessageAsync(tradingPartner, nameof(PlayerMessage.UnexpectedErrorDuringClosingTrade)).ConfigureAwait(false);
             context.Allowed = false;
@@ -117,6 +157,22 @@ public class TradeButtonAction : BaseTradeAction
             (trader as Player)?.Logger.LogError(exception, $"An unexpected error occured during closing the trade. trader: {trader.Name}, partner:{tradingPartner.Name}");
             return TradeResult.Cancelled;
         }
+    }
+
+    private async ValueTask<bool> CheckItemsAreTradableAsync(ITrader trader, IEnumerable<Item> items)
+    {
+        var notTradable = items.FirstOrDefault(item => item.Definition is { IsTradable: false });
+        if (notTradable is null)
+        {
+            return true;
+        }
+
+        (trader as Player)?.Logger.LogWarning(
+            "Trader {0} offered {1}, which its item definition doesn't allow to trade. The trade is cancelled.",
+            trader.Name,
+            notTradable);
+        await this.SendMessageAsync(trader, nameof(PlayerMessage.ItemCannotBeTraded)).ConfigureAwait(false);
+        return false;
     }
 
     private void CallPlugIn(IEnumerable<Item> items, ITrader source, ITrader target)
@@ -138,6 +194,14 @@ public class TradeButtonAction : BaseTradeAction
         foreach (var item in items)
         {
             itemContext.Attach(item);
+        }
+    }
+
+    private void AttachTransferredItemsToPersistenceContext(IEnumerable<Item> items, IContext itemContext)
+    {
+        foreach (var item in items)
+        {
+            itemContext.AttachWithoutParent(item);
         }
     }
 

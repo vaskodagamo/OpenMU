@@ -5,6 +5,7 @@
 namespace MUnique.OpenMU.GameServer.RemoteView.MiniGames;
 
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
 using MUnique.OpenMU.GameLogic.MiniGames;
 using MUnique.OpenMU.GameLogic.PlayerActions.MiniGames;
 using MUnique.OpenMU.Network.Packets.ServerToClient;
@@ -40,6 +41,23 @@ public class ShowMiniGameEnterResultViewPlugIn : IShowMiniGameEnterResultPlugIn
                 break;
             case MiniGameType.ChaosCastle:
                 await this._player.Connection.SendChaosCastleEnterResultAsync(enterResult.ToChaosCastleEnterResult()).ConfigureAwait(false);
+                break;
+            case MiniGameType.Doppelganger:
+                await this._player.Connection.SendDoppelgangerEnterResultAsync(enterResult.ToDoppelgangerEnterResult()).ConfigureAwait(false);
+                break;
+            case MiniGameType.IllusionTemple:
+                await this._player.Connection.SendIllusionTempleEnterResultAsync(enterResult.ToIllusionTempleEnterResult()).ConfigureAwait(false);
+                break;
+            case MiniGameType.ImperialGuardian:
+                if (enterResult != EnterResult.Success)
+                {
+                    // On success, the game shows the zone when the player entered its map.
+                    await this._player.Connection.SendImperialGuardianEnterResultAsync(enterResult.ToImperialGuardianEnterResult(), 0, 0, ImperialGuardianEnterResult.WeatherType.Sun, 0).ConfigureAwait(false);
+                }
+
+                break;
+            case MiniGameType.Kanturu:
+                await this._player.Connection.SendKanturuEnterResultAsync(enterResult.ToKanturuEnterResult()).ConfigureAwait(false);
                 break;
             case MiniGameType.Undefined:
                 throw new ArgumentException("undefined game type", nameof(miniGameType));

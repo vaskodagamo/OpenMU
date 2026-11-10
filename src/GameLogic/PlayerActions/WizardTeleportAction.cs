@@ -4,6 +4,8 @@
 
 namespace MUnique.OpenMU.GameLogic.PlayerActions;
 
+using System.ComponentModel;
+using MUnique.OpenMU.GameLogic.PlugIns;
 using MUnique.OpenMU.GameLogic.Views.World;
 using MUnique.OpenMU.Pathfinding;
 
@@ -15,7 +17,7 @@ public class WizardTeleportAction
     private const ushort TeleportSkillId = 6;
     private const ushort TeleportTargetSkillId = 15;
 
-    private static readonly byte[] PreventingMagicEffects =
+    private static readonly short[] PreventingMagicEffects =
     {
         0x39, // Stone
         0x3D, // Stun
@@ -31,16 +33,16 @@ public class WizardTeleportAction
     /// <param name="target">The target.</param>
     public async ValueTask TryTeleportWithSkillAsync(Player player, Point target)
     {
-        // todo: additional checks:
-        //  - During castle siege, can't teleport over the non-destroyed gates (simple y-axis check)
         if (!player.IsAtSafezone()
             && player.IsActive()
-            && player.SkillList?.GetSkill(TeleportSkillId) is { Skill: { } skill }
+            && player.SkillList?.GetSkill(TeleportSkillId) is { } skillEntry
+            && skillEntry.Skill is { } skill
             && player.CurrentMap!.Terrain.WalkMap[target.X, target.Y]
             && !player.CurrentMap.Terrain.SafezoneMap[target.X, target.Y]
             && player.IsInRange(target, skill.Range)
             && CanPlayerBeTeleported(player)
-            && await player.TryConsumeForSkillAsync(skill).ConfigureAwait(false))
+            && !IsTeleportPreventedByPlugIns(player, target)
+            && await player.TryConsumeForSkillAsync(skillEntry).ConfigureAwait(false))
         {
             _ = Task.Run(() => player.TeleportAsync(target, skill));
         }
@@ -60,7 +62,8 @@ public class WizardTeleportAction
     {
         if (!player.IsAtSafezone()
             && player.IsActive()
-            && player.SkillList?.GetSkill(TeleportTargetSkillId) is { Skill: { } skill }
+            && player.SkillList?.GetSkill(TeleportTargetSkillId) is { } skillEntry
+            && skillEntry.Skill is { } skill
             && player.Party is not null
             && player.CurrentMap!.Terrain.WalkMap[target.X, target.Y]
             && !player.CurrentMap.Terrain.SafezoneMap[target.X, target.Y]
@@ -69,7 +72,8 @@ public class WizardTeleportAction
             && targetPlayer.IsActive()
             && CanPlayerBeTeleported(targetPlayer)
             && targetPlayer.IsInRange(target, skill.Range + 1)
-            && await player.TryConsumeForSkillAsync(skill).ConfigureAwait(false))
+            && !IsTeleportPreventedByPlugIns(targetPlayer, target)
+            && await player.TryConsumeForSkillAsync(skillEntry).ConfigureAwait(false))
         {
             _ = Task.Run(() => targetPlayer.TeleportAsync(target, skill));
         }
@@ -77,20 +81,18 @@ public class WizardTeleportAction
 
     private static bool CanPlayerBeTeleported(Player player)
     {
-        var currentEffects = player.MagicEffectList.ActiveEffects;
-        if (currentEffects.Count == 0)
+        return !player.MagicEffectList.ContainsAnyEffect(PreventingMagicEffects);
+    }
+
+    private static bool IsTeleportPreventedByPlugIns(Player player, Point target)
+    {
+        if (player.GameContext.PlugInManager.GetPlugInPoint<IPlayerTeleportRestrictionPlugIn>() is not { } plugInPoint)
         {
-            return true;
+            return false;
         }
 
-        for (int i = 0; i < PreventingMagicEffects.Length; i++)
-        {
-            if (currentEffects.ContainsKey(PreventingMagicEffects[i]))
-            {
-                return false;
-            }
-        }
-
-        return true;
+        var eventArgs = new CancelEventArgs();
+        plugInPoint.CheckTeleport(player, target, eventArgs);
+        return eventArgs.Cancel;
     }
 }

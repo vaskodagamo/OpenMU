@@ -87,6 +87,16 @@ public enum Storages
     /// The storage of the seed unmount crafting dialog.
     /// </summary>
     SeedUnmountCrafting,
+
+    /// <summary>
+    /// The storage of the lucky item exchange dialog.
+    /// </summary>
+    LuckyItemTrade,
+
+    /// <summary>
+    /// The storage of the lucky item refinery dialog.
+    /// </summary>
+    LuckyItemRefinery,
 }
 
 /// <summary>
@@ -215,6 +225,12 @@ public interface IInventoryStorage : IStorage
     /// Gets equipped ammunition item.
     /// </summary>
     Item? EquippedAmmunitionItem { get; }
+
+    /// <summary>
+    /// Gets this instance as <see cref="InventoryStorage"/>.
+    /// </summary>
+    /// <returns>The inventory as <see cref="InventoryStorage"/>.</returns>
+    InventoryStorage? AsInventoryStorage => this as InventoryStorage;
 }
 
 /// <summary>

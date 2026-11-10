@@ -6,20 +6,18 @@ namespace MUnique.OpenMU.Web.AdminPanel.Pages;
 
 using System.Reflection;
 using System.Threading;
-using Blazored.Modal.Services;
-using Blazored.Toast.Services;
 using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
-using MUnique.OpenMU.DataModel;
 using MUnique.OpenMU.DataModel.Configuration;
 using MUnique.OpenMU.Persistence;
+using MUnique.OpenMU.Web.AdminPanel.Auth;
 using MUnique.OpenMU.Web.AdminPanel.Properties;
 using MUnique.OpenMU.Web.Shared;
+using MUnique.OpenMU.Web.Shared.Components.Modal;
+using MUnique.OpenMU.Web.Shared.Components.Toast;
 using MUnique.OpenMU.Web.Shared.Services;
-using MUnique.OpenMU.Web.Shared.Components;
 
 /// <summary>
 /// Abstract common base class for an edit page.
@@ -84,6 +82,12 @@ public abstract class EditBase : ComponentBase, IAsyncDisposable
     public IToastService ToastService { get; set; } = null!;
 
     /// <summary>
+    /// Gets or sets the loading overlay service.
+    /// </summary>
+    [Inject]
+    public LoadingOverlayService LoadingOverlay { get; set; } = null!;
+
+    /// <summary>
     /// Gets or sets the configuration data source.
     /// </summary>
     [Inject]
@@ -114,6 +118,17 @@ public abstract class EditBase : ComponentBase, IAsyncDisposable
     public ILogger<EditBase>? Logger { get; set; }
 
     /// <summary>
+    /// Gets or sets the guard which checks the permission of the current user before saving.
+    /// </summary>
+    [Inject]
+    public AdminPolicyGuard PolicyGuard { get; set; } = null!;
+
+    /// <summary>
+    /// Gets the authorization policy which is required to save the changes.
+    /// </summary>
+    protected virtual string SavePolicy => AdminPolicies.Administrator;
+
+    /// <summary>
     /// Gets the data source of the type which is edited.
     /// </summary>
     protected virtual IDataSource EditDataSource => this.ConfigDataSource;
@@ -128,6 +143,21 @@ public abstract class EditBase : ComponentBase, IAsyncDisposable
     /// </summary>
     protected virtual Type? Type => this._type ??= this.DetermineTypeByTypeString();
 
+    /// <summary>
+    /// Gets the persistence context which provides the edited data.
+    /// </summary>
+    protected IContext? PersistenceContext => this._persistenceContext;
+
+    /// <summary>
+    /// Gets a value indicating whether this page owns its persistence context.
+    /// </summary>
+    protected bool IsOwningContext => this._isOwningContext;
+
+    /// <summary>
+    /// Gets the download markup for the current type, if supported.
+    /// </summary>
+    protected string? DownloadMarkup => this.GetDownloadMarkup();
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
@@ -139,7 +169,10 @@ public abstract class EditBase : ComponentBase, IAsyncDisposable
         this._disposeCts = null;
 
         await (this._loadTask ?? Task.CompletedTask).ConfigureAwait(false);
-        await this.EditDataSource.DiscardChangesAsync().ConfigureAwait(true);
+        if (await this.HasCurrentContextAsync().ConfigureAwait(false))
+        {
+            await this.EditDataSource.DiscardChangesAsync().ConfigureAwait(false);
+        }
 
         if (this._isOwningContext)
         {
@@ -172,49 +205,11 @@ public abstract class EditBase : ComponentBase, IAsyncDisposable
     }
 
     /// <inheritdoc />
-    protected override void BuildRenderTree(RenderTreeBuilder builder)
-    {
-        if (this.Model is null)
-        {
-            return;
-        }
-
-        builder.OpenComponent<Breadcrumb>(0);
-        builder.AddAttribute(1, nameof(Breadcrumb.Caption), this.Model.GetName());
-        builder.CloseComponent();
-
-        var downloadMarkup = this.GetDownloadMarkup();
-        var editorsMarkup = this.GetEditorsMarkup();
-
-        builder.AddMarkupContent(10, $"<h1>{Resources.Edit} {this.Type!.GetTypeCaption()}</h1>{downloadMarkup}{editorsMarkup}\r\n");
-        this.RenderRefreshButton(builder);
-
-        builder.OpenComponent<CascadingValue<IContext>>(11);
-        builder.AddAttribute(12, nameof(CascadingValue<IContext>.Value), this._persistenceContext);
-        builder.AddAttribute(13, nameof(CascadingValue<IContext>.IsFixed), this._isOwningContext);
-        builder.AddAttribute(14, nameof(CascadingValue<IContext>.ChildContent), (RenderFragment)(builder2 =>
-        {
-            var sequence = 14;
-            this.AddFormToRenderTree(builder2, ref sequence);
-        }));
-
-        builder.CloseComponent();
-    }
-
-    /// <inheritdoc />
     protected override Task OnInitializedAsync()
     {
         this._navigationLockDisposable = this.NavigationManager.RegisterLocationChangingHandler(this.OnBeforeInternalNavigationAsync);
         return base.OnInitializedAsync();
     }
-
-
-    /// <summary>
-    /// Adds the form to the render tree.
-    /// </summary>
-    /// <param name="builder">The builder.</param>
-    /// <param name="currentSequence">The current sequence.</param>
-    protected abstract void AddFormToRenderTree(RenderTreeBuilder builder, ref int currentSequence);
 
     /// <inheritdoc />
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -233,12 +228,11 @@ public abstract class EditBase : ComponentBase, IAsyncDisposable
             {
                 if (this._loadingState != DataLoadingState.Loaded)
                 {
-                    this._modalDisposable = this.ModalService.ShowLoadingIndicator();
+                    this._modalDisposable = this.LoadingOverlay.ShowLoadingIndicator();
                     this.StateHasChanged();
                 }
             }).ConfigureAwait(false);
         }
-
 
         await base.OnAfterRenderAsync(firstRender).ConfigureAwait(true);
     }
@@ -250,6 +244,18 @@ public abstract class EditBase : ComponentBase, IAsyncDisposable
     {
         try
         {
+            if (!await this.PolicyGuard.IsAuthorizedAsync(this.SavePolicy).ConfigureAwait(true))
+            {
+                this.ToastService.ShowError(Resources.ChangeNotPermitted);
+                return;
+            }
+
+            if (!await this.HasCurrentContextAsync().ConfigureAwait(true))
+            {
+                this.ShowContextChangedMessage();
+                return;
+            }
+
             if (this._persistenceContext is { } context)
             {
                 var success = await context.SaveChangesAsync().ConfigureAwait(true);
@@ -260,6 +266,11 @@ public abstract class EditBase : ComponentBase, IAsyncDisposable
             {
                 this.ToastService.ShowError(Resources.FailedByUninitializedContext);
             }
+        }
+        catch (ObjectDisposedException)
+        {
+            // Invalidation may also race the current-context check immediately before the save.
+            this.ShowContextChangedMessage();
         }
         catch (Exception ex)
         {
@@ -274,23 +285,23 @@ public abstract class EditBase : ComponentBase, IAsyncDisposable
     /// </summary>
     protected async Task RefreshAsync()
     {
-        await this.EditDataSource.ForceDiscardChangesAsync().ConfigureAwait(true);
+        var isConfirmed = await this.JavaScript.InvokeAsync<bool>("window.confirm", Resources.UnsavedChangesQuestion).ConfigureAwait(true);
+        if (!isConfirmed)
+        {
+            return;
+        }
+
+        // StateHasChanged below requires the renderer context after asynchronous data-source waits.
+        if (await this.HasCurrentContextAsync().ConfigureAwait(true))
+        {
+            await this.EditDataSource.ForceDiscardChangesAsync().ConfigureAwait(true);
+        }
+
         this._loadingState = DataLoadingState.LoadingStarted;
         var cts = new CancellationTokenSource();
         this._disposeCts = cts;
         this._loadTask = Task.Run(() => this.LoadDataAsync(cts.Token), cts.Token);
         this.StateHasChanged();
-    }
-
-    private void RenderRefreshButton(RenderTreeBuilder builder)
-    {
-        builder.OpenElement(100, "p");
-        builder.OpenElement(101, "button");
-        builder.AddAttribute(102, "class", "btn btn-secondary");
-        builder.AddAttribute(103, "onclick", EventCallback.Factory.Create(this, this.RefreshAsync));
-        builder.AddContent(104, Resources.Refresh);
-        builder.CloseElement();
-        builder.CloseElement();
     }
 
     /// <summary>
@@ -311,12 +322,35 @@ public abstract class EditBase : ComponentBase, IAsyncDisposable
         await this.EditDataSource.GetOwnerAsync(Guid.Empty, cancellationToken).ConfigureAwait(true);
     }
 
+    private async ValueTask<bool> HasCurrentContextAsync()
+        => this._isOwningContext || this._persistenceContext is null
+            || ReferenceEquals(this._persistenceContext, await this.EditDataSource.GetContextAsync().ConfigureAwait(false));
+
+    private void ShowContextChangedMessage()
+        => this.ToastService.ShowError(Resources.EditorContextChanged);
+
     private async ValueTask OnBeforeInternalNavigationAsync(LocationChangingContext context)
     {
-        if (this._persistenceContext?.HasChanges is true)
+        var stale = !await this.HasCurrentContextAsync().ConfigureAwait(true);
+        var hasChanges = stale;
+        if (!stale)
         {
-            var isConfirmed = await this.JavaScript.InvokeAsync<bool>("window.confirm",
-                    Resources.UnsavedChangesQuestion)
+            try
+            {
+                hasChanges = this._persistenceContext?.HasChanges is true;
+            }
+            catch (ObjectDisposedException)
+            {
+                stale = true;
+                hasChanges = true;
+            }
+        }
+
+        if (hasChanges)
+        {
+            var isConfirmed = await this.JavaScript.InvokeAsync<bool>(
+                "window.confirm",
+                Resources.UnsavedChangesQuestion)
                 .ConfigureAwait(true);
 
             if (!isConfirmed)
@@ -325,12 +359,16 @@ public abstract class EditBase : ComponentBase, IAsyncDisposable
             }
             else if (this._isOwningContext)
             {
-                this._persistenceContext.Dispose();
+                this._persistenceContext?.Dispose();
                 this._persistenceContext = null;
+            }
+            else if (!stale)
+            {
+                await this.EditDataSource.DiscardChangesAsync().ConfigureAwait(true);
             }
             else
             {
-                await this.EditDataSource.DiscardChangesAsync().ConfigureAwait(true);
+                // The replacement context may contain another editor's pending changes.
             }
         }
     }
@@ -339,7 +377,9 @@ public abstract class EditBase : ComponentBase, IAsyncDisposable
     {
         if (this.Type is not null && GenericControllerFeatureProvider.SupportedTypes.Any(t => t.Item1 == this.Type))
         {
-            var uri = $"/download/{this.Type.Name}/{this.Type.Name}_{this.Id}.json";
+            // Relative to the base address of the page, which contains the path base of the host,
+            // e.g. "/admin/" in the distributed deployment.
+            var uri = $"download/{this.Type.Name}/{this.Type.Name}_{this.Id}.json";
             return $"<p>{Resources.DownloadAsJson}: <a href=\"{uri}\" download><span class=\"oi oi-data-transfer-download\"></span></a></p>";
         }
 

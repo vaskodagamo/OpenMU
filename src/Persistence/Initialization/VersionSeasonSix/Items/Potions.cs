@@ -9,6 +9,8 @@ using MUnique.OpenMU.DataModel.Attributes;
 using MUnique.OpenMU.DataModel.Configuration;
 using MUnique.OpenMU.DataModel.Configuration.Items;
 using MUnique.OpenMU.GameLogic.Attributes;
+using MUnique.OpenMU.Interfaces;
+using MUnique.OpenMU.Persistence.Initialization.Properties;
 using MUnique.OpenMU.Persistence.Initialization.Skills;
 
 /// <summary>
@@ -16,6 +18,11 @@ using MUnique.OpenMU.Persistence.Initialization.Skills;
 /// </summary>
 public class Potions : InitializerBase
 {
+    /// <summary>
+    /// The maximum number of elite potions in one stack, which matches the client.
+    /// </summary>
+    private const byte ElitePotionMaximumStack = 50;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="Potions"/> class.
     /// </summary>
@@ -59,12 +66,64 @@ public class Potions : InitializerBase
         this.GameConfiguration.Items.Add(this.CreateCherryBlossomWine());
         this.GameConfiguration.Items.Add(this.CreateCherryBlossomRiceCake());
         this.GameConfiguration.Items.Add(this.CreateCherryBlossomFlowerPetal());
+
+        this.CreateElitePotions();
+    }
+
+    /// <summary>
+    /// Creates the elite potions of the in-game shop, which don't exist yet.
+    /// They recover a percentage of the maximum health, mana or shield immediately,
+    /// which is configured at their consume handler plugins.
+    /// The rules which block trading and selling them are applied by the <see cref="ItemRules"/>.
+    /// </summary>
+    /// <returns>The created items.</returns>
+    internal IReadOnlyList<ItemDefinition> CreateElitePotions()
+    {
+        return new[]
+            {
+                this.CreateElitePotion(70, LocalizedString.FromResource(() => ItemNames.EliteHealingPotion)),
+                this.CreateElitePotion(71, LocalizedString.FromResource(() => ItemNames.EliteManaPotion)),
+                this.CreateElitePotion(94, LocalizedString.FromResource(() => ItemNames.MediumEliteHealingPotion)),
+                this.CreateElitePotion(133, LocalizedString.FromResource(() => ItemNames.EliteShieldPotion)),
+            }
+            .OfType<ItemDefinition>()
+            .ToList();
+    }
+
+    /// <summary>
+    /// Creates an elite potion, if it doesn't exist yet.
+    /// </summary>
+    /// <param name="number">The item number.</param>
+    /// <param name="name">The name.</param>
+    /// <returns>The created item, or <c>null</c> if it already exists.</returns>
+    /// <remarks>
+    /// The client stacks them up to <see cref="ElitePotionMaximumStack"/> pieces.
+    /// </remarks>
+    private ItemDefinition? CreateElitePotion(short number, LocalizedString name)
+    {
+        const byte group = 14;
+        if (this.GameConfiguration.Items.Any(item => item.Group == group && item.Number == number))
+        {
+            return null;
+        }
+
+        var potion = this.Context.CreateNew<ItemDefinition>();
+        potion.Name = name;
+        potion.Number = number;
+        potion.Group = group;
+        potion.DropsFromMonsters = false;
+        potion.Durability = ElitePotionMaximumStack;
+        potion.Width = 1;
+        potion.Height = 1;
+        potion.SetGuid(potion.Group, potion.Number);
+        this.GameConfiguration.Items.Add(potion);
+        return potion;
     }
 
     private ItemDefinition CreateAlcohol()
     {
         var alcohol = this.Context.CreateNew<ItemDefinition>();
-        alcohol.Name = "Ale";
+        alcohol.Name = LocalizedString.FromResource(() => ItemNames.Ale);
         alcohol.Number = 9;
         alcohol.Group = 14;
         alcohol.DropsFromMonsters = true;
@@ -86,7 +145,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateApple()
     {
         var apple = this.Context.CreateNew<ItemDefinition>();
-        apple.Name = "Apple";
+        apple.Name = LocalizedString.FromResource(() => ItemNames.Apple);
         apple.Number = 0;
         apple.Group = 14;
         apple.DropsFromMonsters = true;
@@ -107,7 +166,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateSmallHealingPotion()
     {
         var potion = this.Context.CreateNew<ItemDefinition>();
-        potion.Name = "Small Healing Potion";
+        potion.Name = LocalizedString.FromResource(() => ItemNames.SmallHealingPotion);
         potion.Number = 1;
         potion.Group = 14;
         potion.DropsFromMonsters = true;
@@ -128,7 +187,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateMediumHealingPotion()
     {
         var potion = this.Context.CreateNew<ItemDefinition>();
-        potion.Name = "Medium Healing Potion";
+        potion.Name = LocalizedString.FromResource(() => ItemNames.MediumHealingPotion);
         potion.Number = 2;
         potion.Group = 14;
         potion.DropsFromMonsters = true;
@@ -149,7 +208,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateLargeHealingPotion()
     {
         var potion = this.Context.CreateNew<ItemDefinition>();
-        potion.Name = "Large Healing Potion";
+        potion.Name = LocalizedString.FromResource(() => ItemNames.LargeHealingPotion);
         potion.Number = 3;
         potion.Group = 14;
         potion.DropsFromMonsters = true;
@@ -170,7 +229,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateSmallManaPotion()
     {
         var potion = this.Context.CreateNew<ItemDefinition>();
-        potion.Name = "Small Mana Potion";
+        potion.Name = LocalizedString.FromResource(() => ItemNames.SmallManaPotion);
         potion.Number = 4;
         potion.Group = 14;
         potion.DropsFromMonsters = true;
@@ -191,7 +250,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateMediumManaPotion()
     {
         var potion = this.Context.CreateNew<ItemDefinition>();
-        potion.Name = "Medium Mana Potion";
+        potion.Name = LocalizedString.FromResource(() => ItemNames.MediumManaPotion);
         potion.Number = 5;
         potion.Group = 14;
         potion.DropsFromMonsters = true;
@@ -212,7 +271,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateLargeManaPotion()
     {
         var potion = this.Context.CreateNew<ItemDefinition>();
-        potion.Name = "Large Mana Potion";
+        potion.Name = LocalizedString.FromResource(() => ItemNames.LargeManaPotion);
         potion.Number = 6;
         potion.Group = 14;
         potion.DropsFromMonsters = true;
@@ -233,7 +292,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateSmallShieldPotion()
     {
         var potion = this.Context.CreateNew<ItemDefinition>();
-        potion.Name = "Small Shield Potion";
+        potion.Name = LocalizedString.FromResource(() => ItemNames.SmallShieldPotion);
         potion.Number = 35;
         potion.Group = 14;
         potion.DropsFromMonsters = true;
@@ -252,7 +311,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateMediumShieldPotion()
     {
         var potion = this.Context.CreateNew<ItemDefinition>();
-        potion.Name = "Medium Shield Potion";
+        potion.Name = LocalizedString.FromResource(() => ItemNames.MediumShieldPotion);
         potion.Number = 36;
         potion.Group = 14;
         potion.DropsFromMonsters = false;
@@ -271,7 +330,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateLargeShieldPotion()
     {
         var potion = this.Context.CreateNew<ItemDefinition>();
-        potion.Name = "Large Shield Potion";
+        potion.Name = LocalizedString.FromResource(() => ItemNames.LargeShieldPotion);
         potion.Number = 37;
         potion.Group = 14;
         potion.DropsFromMonsters = false;
@@ -290,7 +349,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateSmallComplexPotion()
     {
         var potion = this.Context.CreateNew<ItemDefinition>();
-        potion.Name = "Small Complex Potion";
+        potion.Name = LocalizedString.FromResource(() => ItemNames.SmallComplexPotion);
         potion.Number = 38;
         potion.Group = 14;
         potion.DropsFromMonsters = true;
@@ -310,7 +369,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateMediumComplexPotion()
     {
         var potion = this.Context.CreateNew<ItemDefinition>();
-        potion.Name = "Medium Complex Potion";
+        potion.Name = LocalizedString.FromResource(() => ItemNames.MediumComplexPotion);
         potion.Number = 39;
         potion.Group = 14;
         potion.DropsFromMonsters = true;
@@ -330,7 +389,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateLargeComplexPotion()
     {
         var potion = this.Context.CreateNew<ItemDefinition>();
-        potion.Name = "Large Complex Potion";
+        potion.Name = LocalizedString.FromResource(() => ItemNames.LargeComplexPotion);
         potion.Number = 40;
         potion.Group = 14;
         potion.DropsFromMonsters = true;
@@ -350,7 +409,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateAntidotePotion()
     {
         var potion = this.Context.CreateNew<ItemDefinition>();
-        potion.Name = "Antidote";
+        potion.Name = LocalizedString.FromResource(() => ItemNames.Antidote);
         potion.Number = 8;
         potion.Group = 14;
         potion.DropsFromMonsters = true;
@@ -366,7 +425,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateTownPortalScroll()
     {
         var definition = this.Context.CreateNew<ItemDefinition>();
-        definition.Name = "Town Portal Scroll";
+        definition.Name = LocalizedString.FromResource(() => ItemNames.TownPortalScroll);
         definition.Number = 10;
         definition.Group = 14;
         definition.DropsFromMonsters = true;
@@ -383,7 +442,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateSiegePotion()
     {
         var definition = this.Context.CreateNew<ItemDefinition>();
-        definition.Name = "Potion of Bless;Potion of Soul";
+        definition.Name = LocalizedString.FromResource(() => ItemNames.PotionOfBlessPotionOfSoul);
         definition.Number = 7;
         definition.Group = 14;
         definition.Durability = 10;
@@ -402,7 +461,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateFruits()
     {
         var fruits = this.Context.CreateNew<ItemDefinition>();
-        fruits.Name = "Fruits";
+        fruits.Name = LocalizedString.FromResource(() => ItemNames.Fruits);
         fruits.Number = 15;
         fruits.Group = 13;
         fruits.MaximumItemLevel = 4;
@@ -416,7 +475,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateJackOLanternBlessings()
     {
         var item = this.Context.CreateNew<ItemDefinition>();
-        item.Name = "Jack O'Lantern Blessings";
+        item.Name = LocalizedString.FromResource(() => ItemNames.JackOLanternBlessings);
         item.Number = 46;
         item.Group = 14;
         item.Durability = 10;
@@ -430,7 +489,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateJackOLanternWrath()
     {
         var item = this.Context.CreateNew<ItemDefinition>();
-        item.Name = "Jack O'Lantern Wrath";
+        item.Name = LocalizedString.FromResource(() => ItemNames.JackOLanternWrath);
         item.Number = 47;
         item.Group = 14;
         item.Durability = 10;
@@ -444,7 +503,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateJackOLanternCry()
     {
         var item = this.Context.CreateNew<ItemDefinition>();
-        item.Name = "Jack O'Lantern Cry";
+        item.Name = LocalizedString.FromResource(() => ItemNames.JackOLanternCry);
         item.Number = 48;
         item.Group = 14;
         item.Durability = 10;
@@ -458,7 +517,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateJackOLanternFood()
     {
         var item = this.Context.CreateNew<ItemDefinition>();
-        item.Name = "Jack O'Lantern Food";
+        item.Name = LocalizedString.FromResource(() => ItemNames.JackOLanternFood);
         item.Number = 49;
         item.Group = 14;
         item.Durability = 10;
@@ -472,7 +531,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateJackOLanternDrink()
     {
         var item = this.Context.CreateNew<ItemDefinition>();
-        item.Name = "Jack O'Lantern Drink";
+        item.Name = LocalizedString.FromResource(() => ItemNames.JackOLanternDrink);
         item.Number = 50;
         item.Group = 14;
         item.Durability = 10;
@@ -486,7 +545,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateCherryBlossomWine()
     {
         var item = this.Context.CreateNew<ItemDefinition>();
-        item.Name = "Cherry Blossom Wine";
+        item.Name = LocalizedString.FromResource(() => ItemNames.CherryBlossomWine);
         item.Number = 85;
         item.Group = 14;
         item.Durability = 10;
@@ -500,7 +559,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateCherryBlossomRiceCake()
     {
         var item = this.Context.CreateNew<ItemDefinition>();
-        item.Name = "Cherry Blossom Rice Cake";
+        item.Name = LocalizedString.FromResource(() => ItemNames.CherryBlossomRiceCake);
         item.Number = 86;
         item.Group = 14;
         item.Durability = 10;
@@ -514,7 +573,7 @@ public class Potions : InitializerBase
     private ItemDefinition CreateCherryBlossomFlowerPetal()
     {
         var item = this.Context.CreateNew<ItemDefinition>();
-        item.Name = "Cherry Blossom Flower Petal";
+        item.Name = LocalizedString.FromResource(() => ItemNames.CherryBlossomFlowerPetal);
         item.Number = 87;
         item.Group = 14;
         item.Durability = 10;

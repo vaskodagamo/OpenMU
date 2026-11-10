@@ -41,7 +41,7 @@ public class UpdateCharacterStatsPlugIn : IUpdateCharacterStatsPlugIn
         await connection.SendCharacterInformationAsync(
             this._player.Position.X,
             this._player.Position.Y,
-            this._player.SelectedCharacter!.CurrentMap!.Number.ToUnsigned(),
+            (byte)this._player.SelectedCharacter!.CurrentMap!.Number.ToUnsigned(),
             (ulong)this._player.SelectedCharacter.Experience,
             (ulong)this._player.GameServerContext.ExperienceTable[(int)this._player.Attributes![Stats.Level] + 1],
             (ushort)Math.Max(0, this._player.SelectedCharacter.LevelUpPoints),
@@ -49,14 +49,14 @@ public class UpdateCharacterStatsPlugIn : IUpdateCharacterStatsPlugIn
             (ushort)this._player.Attributes[Stats.BaseAgility],
             (ushort)this._player.Attributes[Stats.BaseVitality],
             (ushort)this._player.Attributes[Stats.BaseEnergy],
-            (ushort)this._player.Attributes[Stats.CurrentHealth],
-            (ushort)this._player.Attributes[Stats.MaximumHealth],
-            (ushort)this._player.Attributes[Stats.CurrentMana],
-            (ushort)this._player.Attributes[Stats.MaximumMana],
-            (ushort)this._player.Attributes[Stats.CurrentShield],
-            (ushort)this._player.Attributes[Stats.MaximumShield],
-            (ushort)this._player.Attributes[Stats.CurrentAbility],
-            (ushort)this._player.Attributes[Stats.MaximumAbility],
+            this._player.Attributes[Stats.CurrentHealth].ToUInt16Clamped(),
+            this._player.Attributes[Stats.MaximumHealth].ToUInt16Clamped(),
+            this._player.Attributes[Stats.CurrentMana].ToUInt16Clamped(),
+            this._player.Attributes[Stats.MaximumMana].ToUInt16Clamped(),
+            this._player.Attributes[Stats.CurrentShield].ToUInt16Clamped(),
+            this._player.Attributes[Stats.MaximumShield].ToUInt16Clamped(),
+            this._player.Attributes[Stats.CurrentAbility].ToUInt16Clamped(),
+            this._player.Attributes[Stats.MaximumAbility].ToUInt16Clamped(),
             (uint)this._player.Money,
             this._player.SelectedCharacter.State.Convert(),
             this._player.SelectedCharacter.CharacterStatus.Convert(),
@@ -65,7 +65,8 @@ public class UpdateCharacterStatsPlugIn : IUpdateCharacterStatsPlugIn
             (ushort)this._player.Attributes[Stats.BaseLeadership],
             (ushort)this._player.SelectedCharacter.UsedNegFruitPoints,
             this._player.SelectedCharacter.GetMaximumFruitPoints(),
-            (byte)this._player.SelectedCharacter.InventoryExtensions)
+            (byte)this._player.SelectedCharacter.InventoryExtensions,
+            direction: this._player.Rotation.ToPacketByte())
             .ConfigureAwait(false);
 
         if (this._player.SelectedCharacter.CharacterClass!.IsMasterClass)

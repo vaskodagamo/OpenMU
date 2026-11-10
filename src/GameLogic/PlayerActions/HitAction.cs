@@ -1,10 +1,11 @@
-﻿// <copyright file="HitAction.cs" company="MUnique">
+// <copyright file="HitAction.cs" company="MUnique">
 // Licensed under the MIT License. See LICENSE file in the project root for full license information.
 // </copyright>
 
 namespace MUnique.OpenMU.GameLogic.PlayerActions;
 
 using MUnique.OpenMU.GameLogic.Attributes;
+using MUnique.OpenMU.GameLogic.PlayerActions.Skills;
 using MUnique.OpenMU.GameLogic.Views.World;
 
 /// <summary>
@@ -21,26 +22,8 @@ public class HitAction
     /// <param name="lookingDirection">The looking direction.</param>
     public async ValueTask HitAsync(Player player, IAttackable target, byte attackAnimation, Direction lookingDirection)
     {
-        if (player.Attributes is not { } attributes)
+        if (!await AttackActionValidator.CanAttackAsync(player, null).ConfigureAwait(false))
         {
-            return;
-        }
-
-        if (attributes[Stats.IsStunned] > 0)
-        {
-            player.Logger.LogWarning("Probably Hacker - player {Player} is attacking in stunned state", player);
-            return;
-        }
-
-        if (attributes[Stats.IsAsleep] > 0)
-        {
-            player.Logger.LogWarning("Probably Hacker - player {Player} is attacking in asleep state", player);
-            return;
-        }
-
-        if (player.IsAtSafezone())
-        {
-            player.Logger.LogWarning("Probably Hacker - player {Player} is attacking from safezone", player);
             return;
         }
 
@@ -51,7 +34,7 @@ public class HitAction
 
         if (target is IObservable targetAsObservable)
         {
-            using var readerLock = await targetAsObservable.ObserverLock.ReaderLockAsync();
+            using var readerLock = await targetAsObservable.ObserverLock.ReaderLockAsync().ConfigureAwait(false);
             if (!targetAsObservable.Observers.Contains(player))
             {
                 // Target out of range
@@ -60,7 +43,14 @@ public class HitAction
         }
 
         player.Rotation = lookingDirection;
-        await target.AttackByAsync(player, null, false).ConfigureAwait(false);
+        var hitInfo = await target.AttackByAsync(player, null, false).ConfigureAwait(false);
+        if (hitInfo is { SkillEntry.Skill: not null } hit)
+        {
+            var success = await target.TryApplyElementalEffectsAsync(player, hit.SkillEntry, hit).ConfigureAwait(false);
+            await player.ForEachWorldObserverAsync<IShowSkillAnimationPlugIn>(p => p.ShowSkillAnimationAsync(player, target, hit.SkillEntry.Skill, success), true).ConfigureAwait(false);
+            return;
+        }
+
         if (player.Attributes?[Stats.TransformationSkin] is { } skin and not 0
             && await this.ApplySkinnedMonstersSkillAsync(player, target, (short)skin).ConfigureAwait(false) is var (skill, effectApplied))
         {
@@ -90,7 +80,7 @@ public class HitAction
         // Currently, we just support one effect for monsters.
         // E.g. Poison for Poison BullFighters.
         if (skill.MagicEffectDef is { Duration: not null } effectDefinition
-            && !target.MagicEffectList.ActiveEffects.ContainsKey(effectDefinition.Number)
+            && !target.MagicEffectList.ContainsEffect(effectDefinition.Number)
             && effectDefinition.PowerUpDefinitions.FirstOrDefault() is { Boost: not null } powerUpDef)
         {
             var powerUp = target.Attributes.CreateElement(powerUpDef);

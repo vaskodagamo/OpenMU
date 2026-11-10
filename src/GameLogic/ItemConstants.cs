@@ -15,9 +15,84 @@ public class ItemConstants
     public static ItemIdentifier SummonOrb => new(11, 12);
 
     /// <summary>
+    /// Gets the identifier for the angel.
+    /// </summary>
+    public static ItemIdentifier Angel => new(0, 13);
+
+    /// <summary>
+    /// Gets the identifier for the imp.
+    /// </summary>
+    public static ItemIdentifier Imp => new(1, 13);
+
+    /// <summary>
+    /// Gets the identifier for the uniria.
+    /// </summary>
+    public static ItemIdentifier Uniria => new(2, 13);
+
+    /// <summary>
+    /// Gets the identifier for the dinorant.
+    /// </summary>
+    public static ItemIdentifier Dinorant => new(3, 13);
+
+    /// <summary>
+    /// Gets the identifier for the dark horse.
+    /// </summary>
+    public static ItemIdentifier DarkHorse => new(4, 13);
+
+    /// <summary>
+    /// Gets the identifier for the Castle Siege Life Stone.
+    /// </summary>
+    public static ItemIdentifier CastleSiegeLifeStone => new(11, 13);
+
+    /// <summary>
     /// Gets the identifier for the fruits.
     /// </summary>
     public static ItemIdentifier Fruits => new(15, 13);
+
+    /// <summary>
+    /// Gets the identifier for the reset fruit of strength, which resets invested points of the stat.
+    /// </summary>
+    public static ItemIdentifier StrengthResetFruit => new(54, 13);
+
+    /// <summary>
+    /// Gets the identifier for the reset fruit of agility, which resets invested points of the stat.
+    /// </summary>
+    public static ItemIdentifier AgilityResetFruit => new(55, 13);
+
+    /// <summary>
+    /// Gets the identifier for the reset fruit of vitality, which resets invested points of the stat.
+    /// </summary>
+    public static ItemIdentifier VitalityResetFruit => new(56, 13);
+
+    /// <summary>
+    /// Gets the identifier for the reset fruit of energy, which resets invested points of the stat.
+    /// </summary>
+    public static ItemIdentifier EnergyResetFruit => new(57, 13);
+
+    /// <summary>
+    /// Gets the identifier for the reset fruit of command, which resets invested points of the stat.
+    /// </summary>
+    public static ItemIdentifier CommandResetFruit => new(58, 13);
+
+    /// <summary>
+    /// Gets the identifier for the fenrir.
+    /// </summary>
+    public static ItemIdentifier Fenrir => new(37, 13);
+
+    /// <summary>
+    /// Gets the identifier for the invitation to the santa village.
+    /// </summary>
+    public static ItemIdentifier InvitationToSantaVillage => new(66, 13);
+
+    /// <summary>
+    /// Gets the identifier for the demon.
+    /// </summary>
+    public static ItemIdentifier Demon => new(64, 13);
+
+    /// <summary>
+    /// Gets the identifier for the rudolf pet.
+    /// </summary>
+    public static ItemIdentifier Rudolf => new(67, 13);
 
     /// <summary>
     /// Gets the identifier for the alcohol.
@@ -70,9 +145,19 @@ public class ItemConstants
     public static ItemIdentifier Antidote => new(8, 14);
 
     /// <summary>
+    /// Gets the identifier for the kalima ticket.
+    /// </summary>
+    public static ItemIdentifier KalimaTicket => new(48, 13);
+
+    /// <summary>
     /// Gets the identifier for the town portal scroll.
     /// </summary>
     public static ItemIdentifier TownPortalScroll => new(10, 14);
+
+    /// <summary>
+    /// Gets the identifier for the jewel of chaos.
+    /// </summary>
+    public static ItemIdentifier JewelOfChaos => new(15, 12);
 
     /// <summary>
     /// Gets the identifier for the jewel of bless.
@@ -90,6 +175,21 @@ public class ItemConstants
     public static ItemIdentifier JewelOfLife => new(16, 14);
 
     /// <summary>
+    /// Gets the identifier for the jewel of creation.
+    /// </summary>
+    public static ItemIdentifier JewelOfCreation => new(22, 14);
+
+    /// <summary>
+    /// Gets the identifier for the jewel of guardian.
+    /// </summary>
+    public static ItemIdentifier JewelOfGuardian => new(31, 14);
+
+    /// <summary>
+    /// Gets the identifier for the gemstone.
+    /// </summary>
+    public static ItemIdentifier Gemstone => new(41, 14);
+
+    /// <summary>
     /// Gets the identifier for the small shield potion.
     /// </summary>
     public static ItemIdentifier SmallShieldPotion => new(35, 14);
@@ -103,6 +203,26 @@ public class ItemConstants
     /// Gets the identifier for the large shield potion.
     /// </summary>
     public static ItemIdentifier LargeShieldPotion => new(37, 14);
+
+    /// <summary>
+    /// Gets the identifier for the elite healing potion of the in-game shop, which recovers the health instantly.
+    /// </summary>
+    public static ItemIdentifier EliteHealingPotion => new(70, 14);
+
+    /// <summary>
+    /// Gets the identifier for the elite mana potion of the in-game shop, which recovers the mana instantly.
+    /// </summary>
+    public static ItemIdentifier EliteManaPotion => new(71, 14);
+
+    /// <summary>
+    /// Gets the identifier for the medium elite healing potion of the in-game shop, which recovers a part of the health instantly.
+    /// </summary>
+    public static ItemIdentifier MediumEliteHealingPotion => new(94, 14);
+
+    /// <summary>
+    /// Gets the identifier for the elite shield (SD) potion of the in-game shop, which recovers a part of the shield instantly.
+    /// </summary>
+    public static ItemIdentifier EliteShieldPotion => new(133, 14);
 
     /// <summary>
     /// Gets the identifier for the small complex potion.
@@ -133,6 +253,16 @@ public class ItemConstants
     /// Gets the identifier for the higher refine stone.
     /// </summary>
     public static ItemIdentifier HigherRefineStone => new(44, 14);
+
+    /// <summary>
+    /// Gets the identifier for the wizard's ring (group 13, number 20).
+    /// </summary>
+    public static ItemIdentifier WizardsRing => new(20, 13);
+
+    /// <summary>
+    /// Gets the identifier for the moonstone pendant (group 13, number 38).
+    /// </summary>
+    public static ItemIdentifier MoonstonePendant => new(38, 13);
 
     /// <summary>
     /// Gets all scrolls.

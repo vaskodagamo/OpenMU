@@ -4,6 +4,8 @@
 
 namespace MUnique.OpenMU.GameLogic.PlayerActions.Guild;
 
+using System.ComponentModel;
+using MUnique.OpenMU.GameLogic.PlugIns;
 using MUnique.OpenMU.GameLogic.Views.Guild;
 
 /// <summary>
@@ -24,6 +26,24 @@ public class GuildCreateAction
         {
             creator.Logger.LogError($"Account {creator.Account?.LoginName} not in the right state, but {creator.PlayerState.CurrentState}.");
             return;
+        }
+
+        if (string.IsNullOrWhiteSpace(guildName))
+        {
+            // The client doesn't send an empty name; a crafted packet does. The protocol knows no better result.
+            creator.Logger.LogWarning("Account {account} requested a guild with an empty name.", creator.Account?.LoginName);
+            await creator.InvokeViewPlugInAsync<IShowGuildCreateResultPlugIn>(p => p.ShowGuildCreateResultAsync(GuildCreateErrorDetail.GuildAlreadyExist)).ConfigureAwait(false);
+            return;
+        }
+
+        if (creator.GameContext.PlugInManager.GetPlugInPoint<IGuildCreatingPlugIn>() is { } plugInPoint)
+        {
+            var eventArgs = new CancelEventArgs();
+            await plugInPoint.GuildCreatingAsync(creator, eventArgs).ConfigureAwait(false);
+            if (eventArgs.Cancel)
+            {
+                return;
+            }
         }
 
         var guildServer = (creator.GameContext as IGameServerContext)?.GuildServer;

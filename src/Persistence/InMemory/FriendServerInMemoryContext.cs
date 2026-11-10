@@ -1,4 +1,4 @@
-﻿// <copyright file="FriendServerInMemoryContext.cs" company="MUnique">
+// <copyright file="FriendServerInMemoryContext.cs" company="MUnique">
 // Licensed under the MIT License. See LICENSE file in the project root for full license information.
 // </copyright>
 
@@ -29,6 +29,12 @@ public class FriendServerInMemoryContext : InMemoryContext, IFriendServerContext
         friend.FriendId = (await this.Provider.GetRepository<Character>().GetAllAsync().ConfigureAwait(false)).FirstOrDefault(character => character.Name == friendName)?.Id ?? Guid.Empty;
         friend.CharacterId = (await this.Provider.GetRepository<Character>().GetAllAsync().ConfigureAwait(false)).FirstOrDefault(character => character.Name == characterName)?.Id ?? Guid.Empty;
         return friend;
+    }
+
+    /// <inheritdoc/>
+    public async ValueTask<bool> CharacterExistsAsync(string characterName)
+    {
+        return (await this.Provider.GetRepository<Character>().GetAllAsync().ConfigureAwait(false)).Any(character => character.Name == characterName);
     }
 
     /// <inheritdoc/>

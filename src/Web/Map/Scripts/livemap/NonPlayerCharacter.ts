@@ -17,9 +17,9 @@ enum NpcObjectKind {
 }
 
 const enum NpcColors {
-    Monster = 0x00FFFF,
-    Passive = 0xFF8800,
-    Default = 0xFFFF00,
+    Monster = 0xC85050,
+    Passive = 0x5050C8,
+    Default = 0xC8C850,
 }
 
 export class NonPlayerCharacter extends Attackable<NpcData> {
@@ -48,5 +48,13 @@ export class NonPlayerCharacter extends Attackable<NpcData> {
             NonPlayerCharacter.defaultGeometry,
             new THREE.MeshBasicMaterial({ color, alphaMap: attackableAlphaMapTexture, transparent: true }),
         );
+    }
+
+    /**
+     * Gets whether this NPC is a monster, the only kind the monster filter applies to.
+     * @returns True if it's a monster; false for merchants, guards, gates and the like.
+     */
+    public isMonster(): boolean {
+        return this.data.npcObjectKind === NpcObjectKind.Monster;
     }
 };

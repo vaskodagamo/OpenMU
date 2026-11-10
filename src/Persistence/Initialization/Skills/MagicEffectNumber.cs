@@ -10,7 +10,7 @@ namespace MUnique.OpenMU.Persistence.Initialization.Skills;
 /// <remarks>Might not be complete. Negative numbers are for internal usage and their effects are not exposed to the game client.</remarks>
 internal enum MagicEffectNumber : short
 {
-    #region Artificial effects which don't end up as an actual magic effect, but regenerate something
+    // Artificial effects which don't end up as an actual magic effect, but regenerate something
 
     /// <summary>
     /// The Beast Uppercut skill effect number.
@@ -43,8 +43,6 @@ internal enum MagicEffectNumber : short
     /// Internal.
     /// </remarks>
     Heal = -2,
-
-    #endregion
 
     /// <summary>
     /// Undefined effect number.
@@ -207,6 +205,31 @@ internal enum MagicEffectNumber : short
     ScrollOfMana = 0x31,
 
     /// <summary>
+    /// The elixir of strength effect.
+    /// </summary>
+    ElixirOfStrength = 0x32,
+
+    /// <summary>
+    /// The elixir of agility effect.
+    /// </summary>
+    ElixirOfAgility = 0x33,
+
+    /// <summary>
+    /// The elixir of vitality effect.
+    /// </summary>
+    ElixirOfVitality = 0x34,
+
+    /// <summary>
+    /// The elixir of energy effect.
+    /// </summary>
+    ElixirOfEnergy = 0x35,
+
+    /// <summary>
+    /// The elixir of leadership effect.
+    /// </summary>
+    ElixirOfLeadership = 0x36,
+
+    /// <summary>
     /// The poisoned effect.
     /// </summary>
     Poisoned = 0x37,
@@ -297,12 +320,63 @@ internal enum MagicEffectNumber : short
     WizEnhance = 0x52,
 
     /// <summary>
+    /// The cold effect caused by skills such as Chain Drive and Strike of Destruction.
+    /// Like <see cref="Iced"/>, it slows down movement, but more so.
+    /// </summary>
+    Cold = 0x56,
+
+    /// <summary>
+    /// The seal of healing effect.
+    /// </summary>
+    SealOfHealing = 0x57,
+
+    /// <summary>
+    /// The seal of divinity effect.
+    /// </summary>
+    SealOfDivinity = 0x58,
+
+    /// <summary>
+    /// The scroll of battle effect.
+    /// </summary>
+    ScrollOfBattle = 0x59,
+
+    /// <summary>
+    /// The scroll of strength effect.
+    /// </summary>
+    ScrollOfStrength = 0x5A,
+
+    /// <summary>
+    /// The master seal of ascension effect.
+    /// </summary>
+    MasterSealOfAscension = 0x65,
+
+    /// <summary>
+    /// The master seal of wealth effect.
+    /// </summary>
+    MasterSealOfWealth = 0x66,
+
+    /// <summary>
+    /// The max AG boost aura effect.
+    /// </summary>
+    MaxAbilityBoostAura = 0x71,
+
+    /// <summary>
+    /// The max SD boost aura effect.
+    /// </summary>
+    MaxShieldBoostAura = 0x72,
+
+    /// <summary>
+    /// The scroll of healing effect.
+    /// </summary>
+    ScrollOfHealing = 0x79,
+
+    /// <summary>
     /// The ignore defense effect of the rage fighter.
     /// </summary>
     IgnoreDefense = 129,
 
     /// <summary>
-    /// The increase health effect of the rage fighter.
+    /// The increase health (stamina) effect of the rage fighter.
     /// </summary>
     IncreaseHealth = 130,
 
@@ -317,21 +391,41 @@ internal enum MagicEffectNumber : short
     DecreaseBlock = 132,
 
     /// <summary>
+    /// The greater fortitude (swell life proficiency) effect.
+    /// </summary>
+    GreaterFortitudeProficiency = 135,
+
+    /// <summary>
     /// The wiz enhance strengthener effect.
     /// </summary>
-    WizEnhance2 = 138,
+    WizEnhanceStrengthener = 138,
 
     /// <summary>
     /// The wiz enhance mastery effect.
     /// </summary>
-    WizEnhance3 = 139,
+    WizEnhanceMastery = 139,
 
     /// <summary>
     /// The critical damage increase mastery effect.
     /// </summary>
     CriticalDamageIncreaseMastery = 148,
 
-    #region Artificial effects which are not sent to the client, starting at 200.
+    /// <summary>
+    /// The increase block power up effect of the rage fighter.
+    /// </summary>
+    IncreaseBlockPowerUp = 153,
+
+    /// <summary>
+    /// The increase block mastery effect of the rage fighter.
+    /// </summary>
+    IncreaseBlockMastery = 154,
+
+    /// <summary>
+    /// The increase health (stamina) strengthener effect of the rage fighter.
+    /// </summary>
+    IncreaseHealthStrengthener = 155,
+
+    // Artificial effects which are not sent to the client, starting at 200.
 
     /// <summary>
     /// The shield skill effect number.
@@ -346,6 +440,13 @@ internal enum MagicEffectNumber : short
     /// </summary>
     Alcohol = 201,
 
-    #endregion
+    /// <summary>
+    /// The illusion temple "Order of Protection" special skill effect number.
+    /// </summary>
+    IllusionTempleProtection = 210,
 
+    /// <summary>
+    /// The illusion temple "Restraint" special skill effect number.
+    /// </summary>
+    IllusionTempleRestraint = 211,
 }

@@ -13,7 +13,7 @@ using MUnique.OpenMU.PlugIns;
 [Guid("00AA4F0E-911D-49FE-8D88-114C7496D383")]
 [PlugIn]
 [Display(Name = nameof(PlugInResources.SetMoneyChatCommandPlugIn_Name), Description = nameof(PlugInResources.SetMoneyChatCommandPlugIn_Description), ResourceType = typeof(PlugInResources))]
-[ChatCommandHelp(Command, "Sets money of a player. Usage: /setmoney (amount) (optional:character)", null)]
+[ChatCommandHelp(Command, typeof(Arguments), MinimumStatus)]
 public class SetMoneyChatCommandPlugIn : ChatCommandPlugInBase<SetMoneyChatCommandPlugIn.Arguments>, IDisabledByDefault
 {
     private const string Command = "/setmoney";
@@ -68,11 +68,13 @@ public class SetMoneyChatCommandPlugIn : ChatCommandPlugInBase<SetMoneyChatComma
         /// <summary>
         /// Gets or sets the amount of money to set.
         /// </summary>
+        [Range(0, int.MaxValue)]
         public int Amount { get; set; }
 
         /// <summary>
         /// Gets or sets the character name to set money for.
         /// </summary>
+        [ValueReference(ChatCommandValueReference.CharacterName)]
         public string? CharacterName { get; set; }
     }
 }

@@ -17,7 +17,14 @@ public class DefaultDropGenerator : IDropGenerator
     /// The amount of money which is dropped at least, and added to the gained experience.
     /// </summary>
     private const int BaseMoneyDrop = 7;
+
+    /// <summary>
+    /// The maximum difference between the level of a monster and the drop level of a randomly
+    /// selected item, so that a monster doesn't drop items which are far below its level.
+    /// It doesn't apply to items which are configured explicitly in a drop item group.
+    /// </summary>
     private const int DropLevelMaxGap = 12;
+
     private const int SkillDropChancePercent = 50;
 
     private const byte DefaultMaxItemOptionLevelDrop = 3;
@@ -70,7 +77,7 @@ public class DefaultDropGenerator : IDropGenerator
             return ([], null);
         }
 
-        using var l = await this._lock.LockAsync();
+        using var l = await this._lock.LockAsync().ConfigureAwait(false);
         this._guaranteedDropGroups.Clear();
         this._chanceDropGroups.Clear();
 
@@ -131,7 +138,7 @@ public class DefaultDropGenerator : IDropGenerator
     /// Gets a random item.
     /// </summary>
     /// <param name="monsterLevel">The monster level.</param>
-    /// <param name="isSocketItem">If set to <c>true</c>, it selects only socket items.</param>
+    /// <param name="isSocketItem">If set to <c>true</c>, it selects only socket items; otherwise, only items without sockets.</param>
     /// <returns>A random item.</returns>
     protected Item? GenerateRandomItem(int monsterLevel, bool isSocketItem)
     {
@@ -185,7 +192,10 @@ public class DefaultDropGenerator : IDropGenerator
         }
 
         var possible = possibleItems ?? this.GetPossibleList(monsterLevel - this._excellentItemDropLevelDelta);
-        var item = this.GenerateRandomItem(possible);
+
+        // Socket items can't be excellent, so they are never selected for an excellent drop.
+        var withoutSocketItems = possible?.Where(it => it.MaximumSockets == 0).ToList();
+        var item = this.GenerateRandomItem(withoutSocketItems);
         if (item is null)
         {
             return null;
@@ -426,6 +436,15 @@ public class DefaultDropGenerator : IDropGenerator
             return null;
         }
 
+        if (possibleItems.Any(definition => !definition.IsActive))
+        {
+            possibleItems = possibleItems.Where(definition => definition.IsActive).ToList();
+            if (possibleItems.Count == 0)
+            {
+                return null;
+            }
+        }
+
         var item = new TemporaryItem
         {
             Definition = possibleItems.ElementAt(this._randomizer.NextInt(0, possibleItems.Count)),
@@ -448,7 +467,9 @@ public class DefaultDropGenerator : IDropGenerator
 
         var itemOfSet = ancientSet.Items.First(i => object.Equals(i.ItemDefinition, item.Definition));
         item.ItemSetGroups.Add(itemOfSet);
-        if (itemOfSet.BonusOption is { } bonusOption) // for example: +5str or +10str
+
+        // For example: +5str or +10str.
+        if (itemOfSet.BonusOption is { } bonusOption)
         {
             var bonusOptionLink = new ItemOptionLink();
             bonusOptionLink.ItemOption = bonusOption;
@@ -526,12 +547,11 @@ public class DefaultDropGenerator : IDropGenerator
             return this.GenerateItemDrop(selectedGroup, selectedGroup.PossibleItems!);
         }
 
+        // The items of the group are configured explicitly, so only their own drop level
+        // range applies. The drop level gap is just for randomly selected items, see GetPossibleList.
         var monsterLevel = (int)monster[Stats.Level];
-        var isJewel = selectedGroup.ItemType == SpecialItemType.Jewel;
-
         var filteredPossibleItems = selectedGroup.PossibleItems!
-            .Where(it => CanDropAtMonsterLevel(it, monsterLevel)
-                         && (isJewel || it.DropLevel == 0 || it.DropLevel > monsterLevel - DropLevelMaxGap))
+            .Where(it => CanDropAtMonsterLevel(it, monsterLevel))
             .ToList();
 
         return this.GenerateItemDrop(selectedGroup, filteredPossibleItems);
@@ -585,7 +605,7 @@ public class DefaultDropGenerator : IDropGenerator
             ??= (from it in this._droppableItems
                  where CanDropAtMonsterLevel(it, monsterLevel)
                        && (it.DropLevel > monsterLevel - DropLevelMaxGap)
-                       && (!isSocketItem || it.MaximumSockets > 0)
+                       && (it.MaximumSockets > 0) == isSocketItem
                  select it).ToList();
     }
 }

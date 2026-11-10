@@ -72,14 +72,14 @@ public static class ItemExtensions
 
     /// <summary>
     /// Gets the dark raven leadership requirement, based on pet level.
-    /// TODO: Make somehow configurable?
+    /// TODO: Make somehow configurable?.
     /// </summary>
     /// <param name="item">The item.</param>
     /// <param name="petLevel">The pet level.</param>
     /// <returns>The required leadership.</returns>
     public static int GetDarkRavenLeadershipRequirement(this Item item, int petLevel)
     {
-        return petLevel * 15 + 185;
+        return (petLevel * 15) + 185;
     }
 
     /// <summary>
@@ -99,6 +99,19 @@ public static class ItemExtensions
     ///   <c>true</c> if the specified item is wearable; otherwise, <c>false</c>.
     /// </returns>
     public static bool IsWearable(this Item item) => item.Definition?.ItemSlot != null;
+
+    /// <summary>
+    /// Determines whether this item can be repaired the normal way (by an NPC, or with the repair of the
+    /// inventory): it must be wearable, and its definition must allow it (<see cref="ItemDefinition.IsRepairable"/>).
+    /// The durability of an item which can't be worn is its number of pieces, so repairing it would reduce a
+    /// stack to one piece. Other ways to restore the durability, like a Jewel of Bless on a Horn of Fenrir,
+    /// don't use this check.
+    /// </summary>
+    /// <param name="item">The item.</param>
+    /// <returns>
+    ///   <c>true</c> if the specified item can be repaired; otherwise, <c>false</c>.
+    /// </returns>
+    public static bool CanBeRepaired(this Item item) => item.IsWearable() && item.Definition!.IsRepairable;
 
     /// <summary>
     /// Determines whether this item is stackable.
@@ -157,11 +170,19 @@ public static class ItemExtensions
     }
 
     /// <summary>
-    /// Gets the <see cref="Item.Durability"/> as byte value, rounded off.
+    /// Gets the <see cref="Item.Durability"/> as byte value, as the client sees it.
     /// </summary>
     /// <param name="item">The item.</param>
-    /// <returns>The durability.</returns>
-    public static byte Durability(this Item item) => (byte)Math.Floor(item.Durability);
+    /// <returns>The durability, rounded up.</returns>
+    /// <remarks>
+    /// The durability is stored with a fraction, so wear can accumulate in small steps, but the client only knows
+    /// whole points. Rounded up, an item loses a point only after a full point of wear, and it shows its last point
+    /// until it's worn out completely, at a durability of 0. The original game behaved the same way: it counted the
+    /// wear separately and took off a whole point when it was full.
+    /// Rounding down would cost a whole point on the first fraction of wear instead: a repaired item would look
+    /// damaged again after a single tick of <c>DurabilityDecayPlugIn</c>, and could be repaired and paid for endlessly.
+    /// </remarks>
+    public static byte Durability(this Item item) => (byte)Math.Min(byte.MaxValue, Math.Ceiling(item.Durability));
 
     /// <summary>
     /// Decreases the durability of an item, and returns <see langword="true"/>, if the integral number changed.
@@ -171,8 +192,8 @@ public static class ItemExtensions
     /// <returns><see langword="true"/>, if the integral number changed.</returns>
     public static bool DecreaseDurability(this Item item, double decrement)
     {
-        var previous = item.Durability;
-        item.Durability = Math.Max(previous - decrement, 0.0);
-        return (byte)Math.Floor(item.Durability) != (byte)Math.Floor(previous);
+        var previousWholeDurability = item.Durability();
+        item.Durability = Math.Max(item.Durability - decrement, 0.0);
+        return item.Durability() != previousWholeDurability;
     }
 }

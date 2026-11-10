@@ -14,7 +14,7 @@ using MUnique.OpenMU.PlugIns;
 [Guid("69AC0B9E-1063-448E-ABD6-C5837A1E8A4B")]
 [PlugIn]
 [Display(Name = nameof(PlugInResources.SetMasterLevelUpPointsChatCommandPlugIn_Name), Description = nameof(PlugInResources.SetMasterLevelUpPointsChatCommandPlugIn_Description), ResourceType = typeof(PlugInResources))]
-[ChatCommandHelp(Command, "Sets master level up points of a player. Usage: /setmasterleveluppoints (points) (optional:character)", null)]
+[ChatCommandHelp(Command, typeof(Arguments), MinimumStatus)]
 public class SetMasterLevelUpPointsChatCommandPlugIn : ChatCommandPlugInBase<SetMasterLevelUpPointsChatCommandPlugIn.Arguments>, IDisabledByDefault
 {
     private const string Command = "/setmasterleveluppoints";
@@ -76,6 +76,7 @@ public class SetMasterLevelUpPointsChatCommandPlugIn : ChatCommandPlugInBase<Set
         /// <summary>
         /// Gets or sets the character name to set master level-up points for.
         /// </summary>
+        [ValueReference(ChatCommandValueReference.CharacterName)]
         public string? CharacterName { get; set; }
     }
 }

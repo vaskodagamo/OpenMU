@@ -2,30 +2,51 @@
 // Licensed under the MIT License. See LICENSE file in the project root for full license information.
 // </copyright>
 
-using System.Threading;
-using Nito.Disposables;
-
 namespace MUnique.OpenMU.Persistence.EntityFramework;
 
 using System.Collections;
+using System.Collections.Concurrent;
+using System.Data;
 using System.Reflection;
+using System.Threading;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using MUnique.OpenMU.DataModel.Composition;
 using MUnique.OpenMU.DataModel.Configuration;
 using Nito.AsyncEx;
+using Nito.Disposables;
 
 /// <summary>
 /// Abstract base class for an <see cref="IContext"/> which uses an <see cref="DbContext"/>.
 /// </summary>
-internal class EntityFrameworkContextBase : IContext
+internal class EntityFrameworkContextBase : IContext, IConfigurationEditContext
 {
+    /// <summary>
+    /// The types whose objects are held by a collection of the <see cref="GameConfiguration"/>.
+    /// Such an object is a root of its own and shared between its owners - a magic effect definition
+    /// is used by a buff, a skill and an item definition alike - so deleting one of its owners must
+    /// not walk into it and take its members along.
+    /// </summary>
+    private static readonly IReadOnlySet<Type> SharedConfigurationTypes = typeof(GameConfiguration)
+        .GetProperties()
+        .Select(property => property.PropertyType)
+        .Select(GetCollectionInterface)
+        .Where(collectionInterface => collectionInterface is not null)
+        .Select(collectionInterface => collectionInterface!.GetGenericArguments()[0])
+        .ToHashSet();
+
+    private static readonly ConcurrentDictionary<IEntityType, IProperty?> PropertyToParentByEntityType = new();
+
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> AggregatePropertiesByType = new();
+
     private readonly bool _isOwner;
     private readonly IConfigurationChangeListener? _changeListener;
     private readonly AsyncLock _lock = new();
     private readonly ILogger _logger;
+    private IDbContextTransaction? _configurationEditTransaction;
     private bool _isDisposed;
     private int _notificationSuspensions;
 
@@ -49,11 +70,6 @@ internal class EntityFrameworkContextBase : IContext
         _ = context.Model;
     }
 
-    /// <summary>
-    /// Finalizes an instance of the <see cref="EntityFrameworkContextBase"/> class.
-    /// </summary>
-    ~EntityFrameworkContextBase() => this.Dispose(false);
-
     /// <inheritdoc />
     public bool HasChanges => this.Context.ChangeTracker.HasChanges();
 
@@ -67,43 +83,41 @@ internal class EntityFrameworkContextBase : IContext
     /// </summary>
     protected IContextAwareRepositoryProvider RepositoryProvider { get; }
 
+    /// <inheritdoc />
+    public async ValueTask BeginConfigurationEditAsync(CancellationToken cancellationToken)
+    {
+        using var gate = await this._lock.LockAsync(cancellationToken).ConfigureAwait(false);
+        if (!this._isOwner || this._configurationEditTransaction is not null || this.Context.Database.CurrentTransaction is not null)
+        {
+            throw new InvalidOperationException("Configuration editing requires an owned context without an existing transaction.");
+        }
+
+        this._configurationEditTransaction = await this.Context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <inheritdoc/>
     public async ValueTask<bool> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        using var l = await this._lock.LockAsync();
-
-        // when we have a change publisher attached, we want to get the changed entries before accepting them.
-        // Otherwise, we can accept them.
-        var acceptChanges = true;
-
-        object? sender = null;
-        SavedChangesEventArgs? args = null;
-        if (this._changeListener is { })
+        // A player's entities can be mutated by game logic on a flow that is not serialized against
+        // this save (for example item destruction on an attacker's thread during combat). Such a
+        // concurrent mutation makes change detection throw while it enumerates a tracked collection.
+        // The mutation is a single, quick operation, so a bounded retry lands on a stable moment
+        // instead of failing the whole save - which would otherwise leave the session unpersisted and
+        // roll the player back on relog.
+        const int maxAttempts = 3;
+        var attempt = 0;
+        while (true)
         {
-            this.Context.SavedChanges += OnSavedChanges;
-            acceptChanges = false;
-        }
-
-        try
-        {
-            await this.Context.SaveChangesAsync(acceptChanges, cancellationToken).ConfigureAwait(false);
-
-            if (args is not null)
+            attempt++;
+            try
             {
-                await this.OnSavedChangesAsync(sender, args).ConfigureAwait(false);
+                return await this.SaveChangesCoreAsync(cancellationToken).ConfigureAwait(false);
             }
-        }
-        finally
-        {
-            this.Context.SavedChanges -= OnSavedChanges;
-        }
-
-        return true;
-
-        void OnSavedChanges(object? s, SavedChangesEventArgs e)
-        {
-            sender = s;
-            args = e;
+            catch (Exception ex) when (attempt < maxAttempts && this._configurationEditTransaction is null && IsTransientConcurrencyConflict(ex is PersistenceConflictException conflict ? conflict.InnerException! : ex))
+            {
+                this._logger.LogWarning(ex, "Transient concurrency conflict while saving (attempt {Attempt}/{MaxAttempts}); retrying.", attempt, maxAttempts);
+                await Task.Delay(attempt * 10, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 
@@ -128,19 +142,11 @@ internal class EntityFrameworkContextBase : IContext
         this.Context.Attach(item);
     }
 
-    private bool DetachInternal(object item)
+    /// <inheritdoc />
+    public void AttachWithoutParent(object item)
     {
-        var entry = this.Context.Entry(item);
-        if (entry is null)
-        {
-            return false;
-        }
-
-        var previousState = entry.State;
-        entry.State = EntityState.Detached;
-        this.ForEachAggregate(item, obj => this.DetachInternal(obj));
-
-        return previousState != EntityState.Added;
+        using var l = this._lock.Lock();
+        this.AttachWithoutParentInternal(item);
     }
 
     /// <inheritdoc />
@@ -158,6 +164,27 @@ internal class EntityFrameworkContextBase : IContext
     {
         using var l = this._lock.Lock();
         var instance = typeof(CachingEntityFrameworkContext).Assembly.CreateNew(type, args);
+        this.Context.Add(instance);
+        return instance;
+    }
+
+    /// <inheritdoc />
+    public object CreateNewWithId(Type type, Guid id)
+    {
+        if (id == Guid.Empty)
+        {
+            throw new ArgumentException("A nonempty identity is required.", nameof(id));
+        }
+
+        using var gate = this._lock.Lock();
+        var instance = typeof(CachingEntityFrameworkContext).Assembly.CreateNew(type);
+        if (instance is not IIdentifiable identified)
+        {
+            throw new ArgumentException($"The configuration {nameof(type)} must support persistent identities.", nameof(type));
+        }
+
+        // Set the key before tracking: detaching and reattaching would lose the Added state.
+        identified.Id = id;
         this.Context.Add(instance);
         return instance;
     }
@@ -184,8 +211,33 @@ internal class EntityFrameworkContextBase : IContext
                 this.DetachInternal(obj);
                 break;
             default:
+                // Removing the parent cascades to its children and detaches Added entries.
+                // Remember their states first: removing such a child again would reattach it
+                // as Deleted, issuing a DELETE for a row which has never been inserted.
+                // The whole aggregate is collected, but not the shared configuration objects: deleting a
+                // monster definition must not take the magic effect definition of its buffs with it.
+                var aggregates = new List<(EntityEntry Entry, EntityState State)>();
+                this.ForEachAggregate(
+                    obj,
+                    a =>
+                    {
+                        var aggregateEntry = this.Context.Entry(a);
+                        aggregates.Add((aggregateEntry, aggregateEntry.State));
+                    },
+                    stopAtSharedConfiguration: true);
                 this.Context.Remove(obj);
-                this.ForEachAggregate(obj, a => this.Context.Remove(a));
+                foreach (var aggregate in aggregates)
+                {
+                    if (aggregate.State == EntityState.Added)
+                    {
+                        aggregate.Entry.State = EntityState.Detached;
+                    }
+                    else
+                    {
+                        this.Context.Remove(aggregate.Entry.Entity);
+                    }
+                }
+
                 break;
         }
 
@@ -269,6 +321,47 @@ internal class EntityFrameworkContextBase : IContext
     }
 
     /// <summary>
+    /// Determines whether changes of an entity type are published as configuration changes.
+    /// </summary>
+    /// <param name="entityType">The entity type.</param>
+    /// <returns><see langword="true"/> when the entity belongs to the configuration schema.</returns>
+    internal static bool PublishesConfigurationChanges(IReadOnlyEntityType entityType)
+        => entityType.GetSchema() == SchemaNames.Configuration;
+
+    /// <summary>
+    /// Determines whether the exception is a transient conflict caused by a concurrent entity mutation
+    /// racing this save, and is therefore worth retrying.
+    /// </summary>
+    /// <param name="exception">The exception thrown by the save.</param>
+    /// <returns><c>true</c> if the save should be retried.</returns>
+    internal static bool IsTransientConcurrencyConflict(Exception exception)
+    {
+        // A disposed context instance is not transient - retrying it can never succeed (e.g. a
+        // save racing the disposal of its own context during a server shutdown). Note that
+        // ObjectDisposedException derives from InvalidOperationException, so it has to be
+        // excluded explicitly before the checks below.
+        if (exception is ObjectDisposedException)
+        {
+            return false;
+        }
+
+        // A concurrent entity mutation racing this save corrupts the change tracker mid-enumeration.
+        // Depending on exactly where change detection was, it surfaces as one of several types - a
+        // modified collection (InvalidOperationException), a transiently-null internal key
+        // (ArgumentNullException/NullReferenceException), or an out-of-range index. All are transient:
+        // the racing mutation is a single quick operation, so a bounded retry lands on a stable moment.
+        // A genuinely persistent error of the same type is not masked - it rethrows once the retries
+        // are exhausted. The deterministic serialization (per-player persistence lock) is the primary
+        // guard; this retry only needs to absorb the rare, bursty sources that lock isn't held for.
+        return exception is DbUpdateConcurrencyException
+            or InvalidOperationException
+            or ArgumentNullException
+            or NullReferenceException
+            or IndexOutOfRangeException
+            or KeyNotFoundException;
+    }
+
+    /// <summary>
     /// Releases unmanaged and - optionally - managed resources.
     /// </summary>
     /// <param name="dispose"><c>true</c> to release both managed and unmanaged resources; <c>false</c> to release only unmanaged resources.</param>
@@ -279,7 +372,167 @@ internal class EntityFrameworkContextBase : IContext
             return;
         }
 
-        this.Context.Dispose();
+        try
+        {
+            this.Context.Dispose();
+        }
+        catch (Exception ex)
+        {
+            // Disposal must never throw - e.g. Npgsql throws InvalidOperationException when the
+            // underlying connection is still opening ("Can't close, connection is in state
+            // Connecting") while it is being closed during a shutdown race. The context is
+            // unusable afterwards either way, so logging is all there is to do.
+            this._logger.LogWarning(ex, "Error while disposing the entity framework context.");
+        }
+    }
+
+    /// <summary>
+    /// Locks this context for an operation which uses the <see cref="Context"/> directly,
+    /// because a <see cref="DbContext"/> doesn't support concurrent operations.
+    /// </summary>
+    /// <remarks>
+    /// The lock is not reentrant, so the locked operation must not call other locking methods of this context.
+    /// </remarks>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The disposable which releases the lock.</returns>
+    protected AwaitableDisposable<IDisposable> LockAsync(CancellationToken cancellationToken)
+    {
+        return this._lock.LockAsync(cancellationToken);
+    }
+
+    private static bool IsRejectedSave(Exception exception)
+    {
+        // Npgsql may wrap server rejections in both an execution-strategy exception and a DbUpdateException.
+        for (Exception? error = exception; error is not null; error = error.InnerException)
+        {
+            if (error is DbUpdateConcurrencyException)
+            {
+                return true;
+            }
+
+            if (error is Npgsql.PostgresException databaseError)
+            {
+                return databaseError.SqlState.StartsWith("23", StringComparison.Ordinal)
+                    || databaseError.SqlState is "40001" or "40P01";
+            }
+        }
+
+        return false;
+    }
+
+    private async ValueTask<bool> SaveChangesCoreAsync(CancellationToken cancellationToken)
+    {
+        using var l = await this._lock.LockAsync(cancellationToken).ConfigureAwait(false);
+
+        // when we have a change publisher attached, we want to get the changed entries before accepting them.
+        // Otherwise, we can accept them.
+        var acceptChanges = true;
+
+        object? sender = null;
+        SavedChangesEventArgs? args = null;
+        if (this._changeListener is { })
+        {
+            this.Context.SavedChanges += OnSavedChanges;
+            acceptChanges = false;
+        }
+
+        try
+        {
+            try
+            {
+                await this.Context.SaveChangesAsync(acceptChanges, cancellationToken).ConfigureAwait(false);
+                if (this._configurationEditTransaction is { } editTransaction)
+                {
+                    // Notify caches and game servers only after the serializable transaction commits.
+                    await editTransaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                    await editTransaction.DisposeAsync().ConfigureAwait(false);
+                    this._configurationEditTransaction = null;
+                }
+            }
+            catch (Exception exception) when (IsRejectedSave(exception))
+            {
+                this.LogConcurrencyConflicts(exception);
+
+                // Classify only explicit server rejections, never a lost connection during commit.
+                throw new PersistenceConflictException(exception);
+            }
+
+            if (args is not null)
+            {
+                await this.OnSavedChangesAsync(sender, args).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            this.Context.SavedChanges -= OnSavedChanges;
+        }
+
+        return true;
+
+        void OnSavedChanges(object? s, SavedChangesEventArgs e)
+        {
+            sender = s;
+            args = e;
+        }
+    }
+
+    private void LogConcurrencyConflicts(Exception exception)
+    {
+        // The entries of a concurrency conflict name the entity which was saved with an unexpected
+        // state, e.g. a DELETE for a row which was never inserted. Npgsql may wrap the exception.
+        for (Exception? error = exception; error is not null; error = error.InnerException)
+        {
+            if (error is not DbUpdateConcurrencyException concurrencyException)
+            {
+                continue;
+            }
+
+            foreach (var entry in concurrencyException.Entries)
+            {
+                var key = entry.Metadata.FindPrimaryKey()?.Properties
+                    .Select(property => $"{property.Name}={entry.Property(property.Name).CurrentValue}");
+                this._logger.LogWarning(
+                    "Save conflict for {EntityType} ({EntityKey}), state {EntityState}.",
+                    entry.Metadata.ClrType.Name,
+                    key is null ? "unknown" : string.Join(", ", key),
+                    entry.State);
+            }
+
+            return;
+        }
+    }
+
+    private void AttachWithoutParentInternal(object item)
+    {
+        // Entry.State only tracks this entity. DbContext.Attach would traverse the item's
+        // RawItemStorage back-reference, reattaching all sibling items in the target inventory.
+        this.Context.Entry(item).State = EntityState.Unchanged;
+        this.ForEachAggregate(item, member => this.Context.Entry(member).State = EntityState.Unchanged, stopAtSharedConfiguration: false);
+    }
+
+    private bool DetachInternal(object item)
+    {
+        var entry = this.Context.Entry(item);
+        if (entry is null)
+        {
+            return false;
+        }
+
+        var previousState = entry.State;
+        entry.State = EntityState.Detached;
+
+        // ForEachAggregate goes through the whole aggregate, so the action must not recurse itself.
+        this.ForEachAggregate(item, this.DetachSingle, stopAtSharedConfiguration: false);
+
+        return previousState != EntityState.Added;
+    }
+
+    private void DetachSingle(object item)
+    {
+        if (this.Context.Entry(item) is { } entry)
+        {
+            entry.State = EntityState.Detached;
+        }
     }
 
     private IRepository<T> GetRepository<T>()
@@ -303,12 +556,36 @@ internal class EntityFrameworkContextBase : IContext
         throw new RepositoryNotFoundException(type);
     }
 
-    private void ForEachAggregate(object obj, Action<object> action)
+    /// <summary>
+    /// Executes the given action for every member of the aggregate of the given object, including
+    /// the members of these members.
+    /// </summary>
+    /// <param name="obj">The aggregate root.</param>
+    /// <param name="action">The action to execute for each member.</param>
+    /// <param name="stopAtSharedConfiguration">
+    /// If set to <c>true</c>, the members of a <see cref="SharedConfigurationTypes">shared configuration
+    /// object</see> are left alone. Required when deleting, not when detaching.
+    /// </param>
+    /// <remarks>
+    /// The recursion matters for the deletion: a member which is referenced BY its owner (e.g. the
+    /// inventory of a character) holds its foreign key at the owner, so no delete cascade of the
+    /// database ever reaches it. Deleting an account removed its characters, but their inventories -
+    /// and every item lying in them - stayed in the database as unreachable rows.
+    /// </remarks>
+    private void ForEachAggregate(object obj, Action<object> action, bool stopAtSharedConfiguration)
     {
-        var aggregateProperties = obj.GetType()
-            .GetProperties(BindingFlags.FlattenHierarchy | BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.GetCustomAttribute<MemberOfAggregateAttribute>() is { }
-                        || p.Name.StartsWith("Joined"));
+        this.ForEachAggregate(obj, action, stopAtSharedConfiguration, true, new HashSet<object>(ReferenceEqualityComparer.Instance));
+    }
+
+    private void ForEachAggregate(object obj, Action<object> action, bool stopAtSharedConfiguration, bool areDirectMembers, HashSet<object> handledMembers)
+    {
+        var aggregateProperties = AggregatePropertiesByType.GetOrAdd(
+            obj.GetType(),
+            static type => type
+                .GetProperties(BindingFlags.FlattenHierarchy | BindingFlags.Public | BindingFlags.Instance)
+                .Where(p => p.GetCustomAttribute<MemberOfAggregateAttribute>() is { }
+                            || p.Name.StartsWith("Joined"))
+                .ToArray());
         foreach (var propertyInfo in aggregateProperties)
         {
             var propertyValue = propertyInfo.GetMethod?.Invoke(obj, []);
@@ -316,14 +593,60 @@ internal class EntityFrameworkContextBase : IContext
             {
                 foreach (var value in enumerable)
                 {
-                    action(value);
+                    this.HandleAggregateMember(value, action, stopAtSharedConfiguration, areDirectMembers, handledMembers);
                 }
             }
             else if (propertyValue is { })
             {
-                action(propertyValue);
+                this.HandleAggregateMember(propertyValue, action, stopAtSharedConfiguration, areDirectMembers, handledMembers);
             }
         }
+    }
+
+    private void HandleAggregateMember(object member, Action<object> action, bool stopAtSharedConfiguration, bool isDirectMember, HashSet<object> handledMembers)
+    {
+        // By reference: the entities compare equal by their id, and freshly created ones share the
+        // default id. Handling a member twice would be wrong anyway, and a graph which references
+        // itself would recurse forever.
+        if (!handledMembers.Add(member))
+        {
+            return;
+        }
+
+        if (stopAtSharedConfiguration && !isDirectMember && IsSharedConfiguration(member))
+        {
+            // Reached through the aggregate of a member, e.g. the magic effect definition of a buff
+            // of a monster definition - which a skill and an item definition may use as well. The
+            // direct members are left as they were: only the recursion is new here.
+            return;
+        }
+
+        action(member);
+        this.ForEachAggregate(member, action, stopAtSharedConfiguration, false, handledMembers);
+    }
+
+    private static Type? GetCollectionInterface(Type type)
+    {
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ICollection<>))
+        {
+            return type;
+        }
+
+        return type.GetInterfaces()
+            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICollection<>));
+    }
+
+    private static bool IsSharedConfiguration(object member)
+    {
+        for (Type? type = member.GetType(); type is not null; type = type.BaseType)
+        {
+            if (SharedConfigurationTypes.Contains(type))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "VSTHRD100:Avoid async void methods", Justification = "Catching all Exceptions.")]
@@ -344,10 +667,18 @@ internal class EntityFrameworkContextBase : IContext
             }
 
             var changedEntries = this.Context.ChangeTracker.Entries()
-                .Where(entity => entity.State != EntityState.Unchanged).ToList();
+                .Where(entity => entity.State != EntityState.Unchanged
+                                 && PublishesConfigurationChanges(entity.Metadata))
+                .ToList();
+            if (changedEntries.Count == 0)
+            {
+                return;
+            }
+
+            var trackedEntriesById = this.GetTrackedEntriesById();
             foreach (var entry in changedEntries)
             {
-                var (parent, parentCollectionNavigation) = this.GetParentInformation(entry);
+                var (parent, parentCollectionNavigation) = this.GetParentInformation(entry, trackedEntriesById);
 
                 switch (entry.State)
                 {
@@ -388,11 +719,14 @@ internal class EntityFrameworkContextBase : IContext
         }
     }
 
-    private (object? Parent, INavigationBase? ParentCollectionNavigation) GetParentInformation(EntityEntry entry)
+    private (object? Parent, INavigationBase? ParentCollectionNavigation) GetParentInformation(EntityEntry entry, IReadOnlyDictionary<Guid, EntityEntry> trackedEntriesById)
     {
-        var propertyToParent = entry.Properties
-            .FirstOrDefault(p => p.Metadata.IsForeignKey()
-                                 && (p.Metadata.IsShadowProperty() || p.Metadata.PropertyInfo?.GetCustomAttribute<IsLinkToParentAttribute>() is not null));
+        var propertyToParentMetadata = PropertyToParentByEntityType.GetOrAdd(
+            entry.Metadata,
+            entityType => entityType.GetProperties()
+                .FirstOrDefault(p => p.IsForeignKey()
+                                     && (p.IsShadowProperty() || p.PropertyInfo?.GetCustomAttribute<IsLinkToParentAttribute>() is not null)));
+        var propertyToParent = propertyToParentMetadata is null ? null : entry.Property(propertyToParentMetadata);
 
         var parentId = (Guid?)(propertyToParent?.CurrentValue ?? propertyToParent?.OriginalValue);
         if (parentId is null)
@@ -402,8 +736,7 @@ internal class EntityFrameworkContextBase : IContext
 
         object? parent = null;
         INavigationBase? parentCollectionNavigation = null;
-        var parentEntry = this.Context.ChangeTracker.Entries().FirstOrDefault(e => e.Entity.GetId() == parentId);
-        if (parentEntry is not null && propertyToParent is not null)
+        if (trackedEntriesById.TryGetValue(parentId.Value, out var parentEntry) && propertyToParent is not null)
         {
             parent = parentEntry.Entity;
             var parentCollection = parentEntry.Collections
@@ -412,6 +745,31 @@ internal class EntityFrameworkContextBase : IContext
             parentCollectionNavigation = parentCollection?.Metadata;
         }
 
+        if (parentCollectionNavigation is null && propertyToParent is not null)
+        {
+            // The parent isn't tracked, e.g. the game configuration when an object is added in a typed context.
+            // Its collection is still known by the relationship, so that the change can be applied to the cached parent.
+            parentCollectionNavigation = propertyToParent.Metadata.GetContainingForeignKeys()
+                .Select(foreignKey => foreignKey.PrincipalToDependent)
+                .FirstOrDefault(navigation => navigation?.IsCollection is true);
+        }
+
         return (parent ?? parentId, parentCollectionNavigation);
+    }
+
+    private Dictionary<Guid, EntityEntry> GetTrackedEntriesById()
+    {
+        var result = new Dictionary<Guid, EntityEntry>();
+        foreach (var trackedEntry in this.Context.ChangeTracker.Entries())
+        {
+            var id = trackedEntry.Entity.GetId();
+            if (id != Guid.Empty)
+            {
+                // first match wins, as in a linear search.
+                result.TryAdd(id, trackedEntry);
+            }
+        }
+
+        return result;
     }
 }

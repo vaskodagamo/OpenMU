@@ -17,9 +17,13 @@ public static class GameContextTestHelper
     /// <summary>
     /// Creates a game context.
     /// </summary>
+    /// <param name="additionalPlugInConfigurations">Additional plugin configurations which should be applied, e.g. to deactivate specific plugins.</param>
+    /// <param name="dropGenerator">The drop generator to use, e.g. to test reward item drops. Defaults to <see cref="NullDropGenerator"/>, which never generates anything.</param>
+    /// <param name="maximumLevel">The maximum character level of the configuration. Needs to be greater than 0 for tests which grant experience, since experience gain stops at the maximum level.</param>
     /// <returns>The game context with MuHelperFeaturePlugIn configured.</returns>
-    public static IGameContext CreateGameContext()
+    public static IGameContext CreateGameContext(IEnumerable<PlugInConfiguration>? additionalPlugInConfigurations = null, IDropGenerator? dropGenerator = null, short maximumLevel = 0)
     {
+        dropGenerator ??= NullDropGenerator.Instance;
         var contextProvider = new InMemoryPersistenceContextProvider();
         var context = contextProvider.CreateNewContext();
         var gameConfig = context.CreateNew<MUnique.OpenMU.Persistence.BasicModel.GameConfiguration>();
@@ -30,6 +34,8 @@ public static class GameContextTestHelper
         gameConfig.MaximumPartySize = 5;
         gameConfig.RecoveryInterval = int.MaxValue;
         gameConfig.MaximumInventoryMoney = int.MaxValue;
+        gameConfig.ItemDropDuration = TimeSpan.FromMinutes(1);
+        gameConfig.MaximumLevel = maximumLevel;
 
         var mapInitializer = new MapInitializer(gameConfig, new NullLogger<MapInitializer>(), NullDropGenerator.Instance, null);
         var plugInConfigurations = new List<PlugInConfiguration>
@@ -40,8 +46,14 @@ public static class GameContextTestHelper
                 IsActive = true,
             },
         };
+
+        if (additionalPlugInConfigurations is { })
+        {
+            plugInConfigurations.AddRange(additionalPlugInConfigurations);
+        }
+
         var plugInManager = new PlugInManager(plugInConfigurations, new NullLoggerFactory(), null, null);
-        var gameContext = new GameContext(gameConfig, contextProvider, mapInitializer, new NullLoggerFactory(), plugInManager, NullDropGenerator.Instance, new ConfigurationChangeMediator());
+        var gameContext = new GameContext(gameConfig, contextProvider, mapInitializer, new NullLoggerFactory(), plugInManager, dropGenerator, new ConfigurationChangeMediator());
         mapInitializer.PlugInManager = gameContext.PlugInManager;
         mapInitializer.PathFinderPool = gameContext.PathFinderPool;
 

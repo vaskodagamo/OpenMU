@@ -1,4 +1,4 @@
-﻿// <copyright file="NavMenu.razor.cs" company="MUnique">
+// <copyright file="NavMenu.razor.cs" company="MUnique">
 // Licensed under the MIT License. See LICENSE file in the project root for full license information.
 // </copyright>
 
@@ -7,9 +7,9 @@ namespace MUnique.OpenMU.Web.AdminPanel.Components.Layout;
 using System.Threading;
 using Microsoft.AspNetCore.Components;
 
+using MUnique.OpenMU.Network.Analyzer;
 using MUnique.OpenMU.Persistence;
 using MUnique.OpenMU.Persistence.Initialization.Updates;
-using MUnique.OpenMU.Web.AdminPanel.Services;
 using MUnique.OpenMU.Web.Shared.Services;
 
 /// <summary>
@@ -25,6 +25,10 @@ public partial class NavMenu : IDisposable
 
     private int _availableConfigUpdates;
 
+    private bool _expandSystem;
+
+    private bool _expandInspect;
+
     [Inject]
     private IMigratableDatabaseContextProvider PersistenceContextProvider { get; set; } = null!;
 
@@ -32,20 +36,30 @@ public partial class NavMenu : IDisposable
     private SetupService SetupService { get; set; } = null!;
 
     [Inject]
-    private IUserService UserService { get; set; } = null!;
-
-    [Inject]
     private DataUpdateService UpdateService { get; set; } = null!;
 
     [Inject]
     private NavigationHistory NavigationHistory { get; set; } = null!;
+
+    [Inject]
+    private IServiceProvider ServiceProvider { get; set; } = null!;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the network analyzer is available. It needs the
+    /// servers in the same process, so it's only registered in the all-in-one deployment.
+    /// </summary>
+    /// <remarks>
+    /// It's determined once, because the menu also renders when its background loading completes,
+    /// which can be after the services of the closed connection were disposed.
+    /// </remarks>
+    private bool IsNetworkAnalyzerAvailable { get; set; }
 
     private Guid? GameConfigurationId { get; set; }
 
     /// <summary>
     /// Gets the class for the entries of the navigation menu.
     /// "collapse" is a class of bootstrap which hides it.
-    /// In our css we also define to show it anyway, if the width sufficient.
+    /// In our CSS we also define to show it anyway, if the width sufficient.
     /// </summary>
     private string NavMenuCssClass => this._collapseNavMenu ? "collapse" : string.Empty;
 
@@ -59,6 +73,7 @@ public partial class NavMenu : IDisposable
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
     {
+        this.IsNetworkAnalyzerAvailable = this.ServiceProvider.GetService(typeof(IPacketCaptureService)) is not null;
         await base.OnInitializedAsync().ConfigureAwait(false);
         this.SetupService.DatabaseInitialized += this.OnDatabaseInitializedAsync;
         this.UpdateService.UpdatesInstalled += this.OnUpdatesInstalledAsync;
@@ -143,5 +158,15 @@ public partial class NavMenu : IDisposable
     private void ToggleNavMenu()
     {
         this._collapseNavMenu = !this._collapseNavMenu;
+    }
+
+    private void ToggleSystem()
+    {
+        this._expandSystem = !this._expandSystem;
+    }
+
+    private void ToggleInspect()
+    {
+        this._expandInspect = !this._expandInspect;
     }
 }

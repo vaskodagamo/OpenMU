@@ -12,7 +12,7 @@ export class WorldObjectPicker {
     private readonly raycaster: THREE.Raycaster = new THREE.Raycaster();
     private readonly mouse: THREE.Vector2 = new THREE.Vector2();
 
-    private readonly onObjectPicked: (data: ObjectData) => void;
+    private readonly onObjectPicked: (data: ObjectData | null) => void;
     private readonly onObjectHovered?: (data: ObjectData | null) => void;
 
     private isHoverRaycastPending: boolean = false;
@@ -26,7 +26,7 @@ export class WorldObjectPicker {
         private readonly worldCanvas: HTMLElement,
         private readonly worldMesh: World,
         private readonly camera: THREE.Camera,
-        onObjectPicked: (data: ObjectData) => void,
+        onObjectPicked: (data: ObjectData | null) => void,
         onObjectHovered?: (data: ObjectData | null) => void,
     ) {
         this.onObjectPicked = onObjectPicked;
@@ -46,9 +46,7 @@ export class WorldObjectPicker {
 
     private onClick(e: MouseEvent): void {
         const data = this.pickAt(e.offsetX, e.offsetY);
-        if (data !== null) {
-            this.onObjectPicked(data);
-        }
+        this.onObjectPicked(data);
     }
 
     private onMouseMove(e: MouseEvent): void {
@@ -83,8 +81,21 @@ export class WorldObjectPicker {
         this.mouse.y = -(offsetY / this.worldCanvas.clientHeight) * 2 + 1;
         this.raycaster.setFromCamera(this.mouse, this.camera);
 
+        // The raycaster also hits hidden objects, e.g. the monsters which the monster filter hides.
         const intersects = this.raycaster.intersectObjects(this.worldMesh.children, true);
-        return intersects.length ? this.extractObjectData(intersects[0]) : null;
+        const visibleIntersection = intersects.find((intersection) => this.isVisible(intersection.object));
+        return visibleIntersection ? this.extractObjectData(visibleIntersection) : null;
+    }
+
+    private isVisible(obj: THREE.Object3D): boolean {
+        let current: THREE.Object3D | null = obj;
+        while (current) {
+            if (!current.visible) {
+                return false;
+            }
+            current = current.parent;
+        }
+        return true;
     }
 
     private extractObjectData(intersection: THREE.Intersection): ObjectData | null {

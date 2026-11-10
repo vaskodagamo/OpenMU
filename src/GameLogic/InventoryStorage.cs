@@ -109,9 +109,9 @@ public class InventoryStorage : Storage, IInventoryStorage
         if (success)
         {
             var isEquippedItem = this.IsWearingSlot(slot);
-            if (isEquippedItem && this.EquippedItemsChanged is { } eventHandler)
+            if (isEquippedItem)
             {
-                await eventHandler(new ItemEventArgs(convertedItem ?? item, true)).ConfigureAwait(false);
+                await this.RaiseEquippedItemsChangedAsync(convertedItem ?? item, true).ConfigureAwait(false);
             }
         }
 
@@ -123,9 +123,31 @@ public class InventoryStorage : Storage, IInventoryStorage
     {
         var isEquippedItem = this.IsWearingSlot(item.ItemSlot);
         await base.RemoveItemAsync(item).ConfigureAwait(false);
-        if (isEquippedItem && this.EquippedItemsChanged is { } eventHandler)
+        if (isEquippedItem)
         {
-            await eventHandler(new ItemEventArgs(item, false)).ConfigureAwait(false);
+            await this.RaiseEquippedItemsChangedAsync(item, false).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Raises the <see cref="EquippedItemsChanged"/> event.
+    /// </summary>
+    /// <param name="item">The item.</param>
+    /// <param name="isEquipped">Whether <paramref name="item"/> is equipped or not.</param>
+    /// <param name="hasDurabilityFactorChanged">Whether <paramref name="item"/>'s durability factor has changed or not.</param>
+    /// <returns>True, if successful.</returns>
+    public async ValueTask RaiseEquippedItemsChangedAsync(Item item, bool isEquipped, bool hasDurabilityFactorChanged = false)
+    {
+        var eventHandler = this.EquippedItemsChanged;
+        if (eventHandler is null)
+        {
+            return;
+        }
+
+        var eventArgs = new ItemEventArgs(item, isEquipped, hasDurabilityFactorChanged);
+        foreach (AsyncEventHandler<ItemEventArgs> handler in eventHandler.GetInvocationList())
+        {
+            await handler(eventArgs).ConfigureAwait(false);
         }
     }
 
@@ -155,10 +177,7 @@ public class InventoryStorage : Storage, IInventoryStorage
             }
         }
 
-        if (item.Definition!.PossibleItemSetGroups.Count > 0)
-        {
-            this.UpdateSetPowerUps();
-        }
+        this.UpdateSetPowerUps();
 
         var itemAdded = this.EquippedItems.Contains(item);
         if (itemAdded)

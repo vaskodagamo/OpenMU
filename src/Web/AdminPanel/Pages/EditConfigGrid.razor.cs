@@ -8,17 +8,18 @@ using System.Collections;
 using System.ComponentModel;
 using System.Reflection;
 using System.Threading;
-using Blazored.Modal;
-using Blazored.Modal.Services;
-using Blazored.Toast.Services;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.QuickGrid;
 using Microsoft.Extensions.Logging;
+using MUnique.OpenMU.DataModel;
 using MUnique.OpenMU.DataModel.Configuration;
 using MUnique.OpenMU.Persistence;
+using MUnique.OpenMU.Web.AdminPanel.Auth;
 using MUnique.OpenMU.Web.AdminPanel.Properties;
 using MUnique.OpenMU.Web.Shared;
-using MUnique.OpenMU.Web.Shared.Components.Form.Modal;
+using MUnique.OpenMU.Web.Shared.Components.Modal;
+using MUnique.OpenMU.Web.Shared.Components.Toast;
+using MUnique.OpenMU.Web.Shared.Services;
 
 /// <summary>
 /// Razor page which shows objects of the specified type in a grid.
@@ -37,6 +38,12 @@ public partial class EditConfigGrid : ComponentBase, IAsyncDisposable
     /// </summary>
     [Parameter]
     public string TypeString { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the guard which checks the permission of the current user before saving.
+    /// </summary>
+    [Inject]
+    public AdminPolicyGuard PolicyGuard { get; set; } = null!;
 
     /// <summary>
     /// Gets or sets the data source.
@@ -63,6 +70,12 @@ public partial class EditConfigGrid : ComponentBase, IAsyncDisposable
     public IModalService ModalService { get; set; } = null!;
 
     /// <summary>
+    /// Gets or sets the creation panel service which hosts the "create new" form in a persistent side panel.
+    /// </summary>
+    [Inject]
+    public CreationPanelService CreationPanelService { get; set; } = null!;
+
+    /// <summary>
     /// Gets or sets the toast service.
     /// </summary>
     [Inject]
@@ -73,6 +86,12 @@ public partial class EditConfigGrid : ComponentBase, IAsyncDisposable
     /// </summary>
     [Inject]
     public ILogger<EditConfigGrid> Logger { get; set; } = null!;
+
+    /// <summary>
+    /// Gets or sets the loading overlay service.
+    /// </summary>
+    [Inject]
+    public LoadingOverlayService LoadingService { get; set; } = null!;
 
     /// <summary>
     /// Gets or sets the type.
@@ -99,6 +118,8 @@ public partial class EditConfigGrid : ComponentBase, IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        this.CreationPanelService.ItemCreated -= this.OnItemCreatedAsync;
+
         await (this._disposeCts?.CancelAsync() ?? Task.CompletedTask).ConfigureAwait(false);
         this._disposeCts?.Dispose();
         this._disposeCts = null;
@@ -118,6 +139,13 @@ public partial class EditConfigGrid : ComponentBase, IAsyncDisposable
     }
 
     /// <inheritdoc />
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        this.CreationPanelService.ItemCreated += this.OnItemCreatedAsync;
+    }
+
+    /// <inheritdoc />
     protected override async Task OnParametersSetAsync()
     {
         this.NameFilter = string.Empty;
@@ -130,6 +158,7 @@ public partial class EditConfigGrid : ComponentBase, IAsyncDisposable
 
     private async Task LoadDataAsync(CancellationToken cancellationToken)
     {
+        using var loading = this.LoadingService.ShowLoadingIndicator();
         cancellationToken.ThrowIfCancellationRequested();
         if (this.Type is null)
         {
@@ -169,9 +198,15 @@ public partial class EditConfigGrid : ComponentBase, IAsyncDisposable
 
     private async Task OnDeleteButtonClickAsync(ViewModel viewModel)
     {
+        if (!await this.PolicyGuard.IsAuthorizedAsync(AdminPolicies.Administrator).ConfigureAwait(true))
+        {
+            this.ToastService.ShowError(Resources.ChangeNotPermitted);
+            return;
+        }
+
         try
         {
-            var dialogResult = await this.ModalService.ShowQuestionAsync("Are you sure?", $"You're about to delete '{viewModel.Name}. Are you sure?").ConfigureAwait(true);
+            var dialogResult = await this.ModalService.ShowQuestionAsync(Resources.ConfirmDelete, string.Format(Resources.ConfirmDeleteEntry, viewModel.Name)).ConfigureAwait(true);
             if (!dialogResult)
             {
                 return;
@@ -183,93 +218,139 @@ public partial class EditConfigGrid : ComponentBase, IAsyncDisposable
             var toDelete = await deleteContext.GetByIdAsync(viewModel.Id, this.Type!, cancellationToken).ConfigureAwait(false);
             if (toDelete is null)
             {
-                 this.ToastService.ShowError(string.Format(Resources.CouldNotFindToDelete, viewModel.Name));
-                 return;
+                this.ToastService.ShowError(string.Format(Resources.CouldNotFindToDelete, viewModel.Name));
+                return;
             }
 
             await deleteContext.DeleteAsync(toDelete).ConfigureAwait(false);
             await deleteContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             await this.DataSource.ForceDiscardChangesAsync().ConfigureAwait(false);
-            this.ToastService.ShowSuccess($"Deleted '{viewModel.Name}' successfully.");
+            this.ToastService.ShowSuccess(string.Format(Resources.DeletedSuccessfully, viewModel.Name));
             this._viewModels = null;
             this._loadTask = Task.Run(() => this.LoadDataAsync(cancellationToken), cancellationToken);
         }
         catch (Exception ex)
         {
-             this.Logger.LogError(ex, "Couldn't delete {viewModelName}, probably because it's referenced by another object.", viewModel.Name);
-             this.ToastService.ShowError(Resources.DeleteFailedReferenced);
+            this.Logger.LogError(ex, "Couldn't delete {viewModelName}, probably because it's referenced by another object.", viewModel.Name);
+            this.ToastService.ShowError(Resources.DeleteFailedReferenced);
         }
     }
 
     private async Task OnCreateButtonClickAsync()
     {
+        if (!await this.PolicyGuard.IsAuthorizedAsync(AdminPolicies.Administrator).ConfigureAwait(true))
+        {
+            this.ToastService.ShowError(Resources.ChangeNotPermitted);
+            return;
+        }
+
         var cancellationToken = this._disposeCts?.Token ?? default;
         var gameConfiguration = await this.DataSource.GetOwnerAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-        using var creationContext = this.PersistenceContextProvider.CreateNewTypedContext(this.Type!, true, gameConfiguration);
-        var newObject = creationContext.CreateNew(this.Type!);
-        var parameters = new ModalParameters();
-        var modalType = typeof(ModalCreateNew<>).MakeGenericType(this.Type!);
-
-        parameters.Add(nameof(ModalCreateNew<object>.Item), newObject);
-        parameters.Add(nameof(ModalCreateNew<object>.PersistenceContext), creationContext);
-        var options = new ModalOptions
+        var creationContext = this.PersistenceContextProvider.CreateNewTypedContext(this.Type!, true, gameConfiguration);
+        try
         {
-            DisableBackgroundCancel = true,
-        };
+            var newObject = creationContext.CreateNew(this.Type!);
 
-        var modal = this.ModalService.Show(modalType, $"Create", parameters, options);
-        var result = await modal.Result.ConfigureAwait(false);
-        if (!result.Cancelled)
-        {
-            await creationContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            await this.DataSource.ForceDiscardChangesAsync().ConfigureAwait(false);
+            var session = new CreationSession
+            {
+                Title = string.Format(Resources.CreateEntry, this.Type!.GetTypeCaption()),
+                Item = newObject,
+                ItemType = this.Type!,
+                Context = creationContext,
+                OwnsContext = true,
+                SaveAsync = async () =>
+                {
+                    await creationContext.SaveChangesAsync().ConfigureAwait(false);
+                    await this.DataSource.ForceDiscardChangesAsync().ConfigureAwait(false);
+                    this.ToastService.ShowSuccess(Resources.CreatedSuccessfully);
+                },
+            };
 
-            this.ToastService.ShowSuccess("New object successfully created.");
-            this._viewModels = null;
-            this._loadTask = Task.Run(() => this.LoadDataAsync(cancellationToken), cancellationToken);
+            var started = await this.CreationPanelService.BeginAsync(session).ConfigureAwait(false);
+            if (!started)
+            {
+                creationContext.Dispose();
+            }
         }
+        catch
+        {
+            creationContext.Dispose();
+            throw;
+        }
+    }
+
+    private Task OnItemCreatedAsync(Type createdType)
+    {
+        if (createdType != this.Type)
+        {
+            return Task.CompletedTask;
+        }
+
+        return this.InvokeAsync(() =>
+        {
+            var cancellationToken = this._disposeCts?.Token ?? default;
+            this._viewModels = null;
+            this.StateHasChanged();
+            this._loadTask = Task.Run(() => this.LoadDataAsync(cancellationToken), cancellationToken);
+        });
     }
 
     private async Task OnDuplicateButtonClickAsync(ViewModel viewModel)
     {
+        if (!await this.PolicyGuard.IsAuthorizedAsync(AdminPolicies.Administrator).ConfigureAwait(true))
+        {
+            this.ToastService.ShowError(Resources.ChangeNotPermitted);
+            return;
+        }
+
         try
         {
             var cancellationToken = this._disposeCts?.Token ?? default;
             var gameConfiguration = await this.DataSource.GetOwnerAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-            using var context = this.PersistenceContextProvider.CreateNewTypedContext(this.Type!, true, gameConfiguration);
-            var original = await context.GetByIdAsync(viewModel.Id, this.Type!, cancellationToken).ConfigureAwait(false);
-            if (original is null)
+            var context = this.PersistenceContextProvider.CreateNewTypedContext(this.Type!, true, gameConfiguration);
+            try
             {
-                this.ToastService.ShowError(string.Format(Resources.CouldNotFindToDuplicate, viewModel.Name));
-                return;
+                var original = await context.GetByIdAsync(viewModel.Id, this.Type!, cancellationToken).ConfigureAwait(false);
+                if (original is null)
+                {
+                    this.ToastService.ShowError(string.Format(Resources.CouldNotFindToDuplicate, viewModel.Name));
+                    context.Dispose();
+                    return;
+                }
+
+                var newObject = await this.DuplicateObjectAsync(original, gameConfiguration, context, viewModel, cancellationToken).ConfigureAwait(false);
+                if (newObject is null)
+                {
+                    context.Dispose();
+                    return;
+                }
+
+                var duplicatedName = viewModel.Name;
+                var session = new CreationSession
+                {
+                    Title = string.Format(Resources.DuplicateEntry, duplicatedName),
+                    Item = newObject,
+                    ItemType = this.Type!,
+                    Context = context,
+                    OwnsContext = true,
+                    SaveAsync = async () =>
+                    {
+                        await context.SaveChangesAsync().ConfigureAwait(false);
+                        await this.DataSource.ForceDiscardChangesAsync().ConfigureAwait(false);
+                        this.ToastService.ShowSuccess(string.Format(Resources.DuplicatedSuccessfully, duplicatedName));
+                    },
+                };
+
+                var started = await this.CreationPanelService.BeginAsync(session).ConfigureAwait(false);
+                if (!started)
+                {
+                    context.Dispose();
+                }
             }
-
-            var newObject = await this.DuplicateObjectAsync(original, gameConfiguration, context, viewModel, cancellationToken).ConfigureAwait(false);
-            if (newObject is null)
+            catch
             {
-                return;
-            }
-
-            var parameters = new ModalParameters();
-            var modalType = typeof(ModalCreateNew<>).MakeGenericType(this.Type!);
-
-            parameters.Add(nameof(ModalCreateNew<object>.Item), newObject);
-            parameters.Add(nameof(ModalCreateNew<object>.PersistenceContext), context);
-            var options = new ModalOptions
-            {
-                DisableBackgroundCancel = true,
-            };
-
-            var modal = this.ModalService.Show(modalType, $"Duplicate '{viewModel.Name}'", parameters, options);
-            var result = await modal.Result.ConfigureAwait(false);
-            if (!result.Cancelled)
-            {
-                await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-                await this.DataSource.ForceDiscardChangesAsync().ConfigureAwait(false);
-
-                this.ToastService.ShowSuccess(string.Format(Resources.DuplicatedSuccessfully, viewModel.Name));
-                this._viewModels = null;
-                this._loadTask = Task.Run(() => this.LoadDataAsync(cancellationToken), cancellationToken);
+                context.Dispose();
+                throw;
             }
         }
         catch (Exception ex)
@@ -322,7 +403,7 @@ public partial class EditConfigGrid : ComponentBase, IAsyncDisposable
 
         if (cloneMethod is null || !this.Type.IsAssignableFrom(cloneMethod.ReturnType))
         {
-            this.ToastService.ShowError($"Type '{this.Type.Name}' must have a Clone method that takes '{nameof(GameConfiguration)}' and returns '{this.Type.Name}'.");
+            this.ToastService.ShowError(string.Format(Resources.InvalidCloneMethod, this.Type.Name, nameof(GameConfiguration)));
             return null;
         }
 
@@ -364,8 +445,8 @@ public partial class EditConfigGrid : ComponentBase, IAsyncDisposable
         var clearMethod = targetValue!.GetType().GetMethod("Clear");
         clearMethod?.Invoke(targetValue, null);
 
-        var itemType = prop.PropertyType.IsGenericType 
-            ? prop.PropertyType.GetGenericArguments().FirstOrDefault() 
+        var itemType = prop.PropertyType.IsGenericType
+            ? prop.PropertyType.GetGenericArguments().FirstOrDefault()
             : null;
 
         foreach (var item in sourceCollection)
@@ -432,6 +513,7 @@ public partial class EditConfigGrid : ComponentBase, IAsyncDisposable
         /// <summary>
         /// Gets or sets the name of the object.
         /// </summary>
+        [System.ComponentModel.DataAnnotations.Display(Name = nameof(Resources.ConfigurationEntryName), ResourceType = typeof(Resources))]
         public string Name { get; set; }
     }
 }

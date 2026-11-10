@@ -51,12 +51,17 @@ public class ShowHitExtendedPlugIn : IShowHitPlugIn
         var healthStatus = this.CalcStatStatus(target, Stats.CurrentHealth, Stats.MaximumHealth);
         var shieldStatus = this.CalcStatStatus(target, Stats.CurrentShield, Stats.MaximumShield);
         var targetId = target.GetId(this._player);
+        if (hitInfo.TriggersHitShock == true)
+        {
+            targetId |= 0x8000;
+        }
+
         await connection.SendObjectHitExtendedAsync(
             this.GetDamageKind(hitInfo.Attributes),
             hitInfo.Attributes.HasFlag(DamageAttributes.RageFighterStreakHit),
             hitInfo.Attributes.HasFlag(DamageAttributes.RageFighterStreakFinalHit),
             hitInfo.Attributes.HasFlag(DamageAttributes.Double),
-            hitInfo.Attributes.HasFlag(DamageAttributes.Triple),
+            hitInfo.Attributes.HasFlag(DamageAttributes.Triple) || hitInfo.Attributes.HasFlag(DamageAttributes.Combo),
             targetId,
             healthStatus,
             shieldStatus,
